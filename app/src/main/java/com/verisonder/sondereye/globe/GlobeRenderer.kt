@@ -205,6 +205,7 @@ class GlobeRenderer(
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
                 textures[k] = ids[0]
             }
+            if (k.z == TileSelect.ROOT_Z) sampleCapColour(k, bmp)
             bmp.recycle()
             n++
         }
@@ -240,7 +241,29 @@ class GlobeRenderer(
     }
 
     // ---- Polar caps -----------------------------------------------------------------
-    // Web Mercator stops at 85.05°. The caps close the globe there with a flat colour.
+    // Web Mercator stops at 85.05°. The caps close the globe there with a flat colour
+    // averaged from the imagery's own edge row, so they blend in whatever the provider
+    // shows there (open Arctic water in the north, ice in the south).
+
+    /** Per pole, per root tile column: summed r, g, b and a pixel count. */
+    private val capSums = Array(2) { Array(1 shl TileSelect.ROOT_Z) { DoubleArray(4) } }
+    private val capRgb = arrayOf(floatArrayOf(CAP_R, CAP_G, CAP_B), floatArrayOf(CAP_R, CAP_G, CAP_B))
+
+    private fun sampleCapColour(k: TileKey, bmp: Bitmap) {
+        val last = (1 shl k.z) - 1
+        val pole = when (k.y) { 0 -> 0; last -> 1; else -> return }
+        val row = if (pole == 0) 0 else bmp.height - 1
+        val px = IntArray(bmp.width)
+        bmp.getPixels(px, 0, bmp.width, 0, row, bmp.width, 1)
+        val sum = capSums[pole][k.x]
+        sum.fill(0.0)
+        for (c in px) {
+            sum[0] += (c shr 16) and 0xFF; sum[1] += (c shr 8) and 0xFF; sum[2] += c and 0xFF; sum[3] += 1.0
+        }
+        var r = 0.0; var g = 0.0; var b = 0.0; var count = 0.0
+        for (col in capSums[pole]) { r += col[0]; g += col[1]; b += col[2]; count += col[3] }
+        if (count > 0) capRgb[pole] = floatArrayOf((r / count / 255).toFloat(), (g / count / 255).toFloat(), (b / count / 255).toFloat())
+    }
 
     private fun buildCaps() {
         val seg = 64
@@ -261,13 +284,14 @@ class GlobeRenderer(
 
     private fun drawCaps(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int) {
         GLES30.glUniform1f(uHasTex, 0f)
-        GLES30.glUniform3f(uColor, CAP_R, CAP_G, CAP_B)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, capVbo)
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 20, 0)
         GLES30.glEnableVertexAttribArray(1)
         GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 20, 12)
         for ((i, sign) in intArrayOf(1, -1).withIndex()) {
+            val c = capRgb[i]
+            GLES30.glUniform3f(uColor, c[0], c[1], c[2])
             M4.toFloat(view.mvp(Geo.ecef(90.0 * sign, 0.0)), mvp)
             GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLES, i * capCount, capCount)
@@ -399,7 +423,7 @@ class GlobeRenderer(
 
         private const val SPACE_R = 0.012f; private const val SPACE_G = 0.024f; private const val SPACE_B = 0.039f
         private const val OCEAN_R = 0.043f; private const val OCEAN_G = 0.102f; private const val OCEAN_B = 0.165f
-        private const val CAP_R = 0.72f; private const val CAP_G = 0.77f; private const val CAP_B = 0.81f
+        private const val CAP_R = 0.043f; private const val CAP_G = 0.102f; private const val CAP_B = 0.165f
 
         private const val TILE_VS = """#version 300 es
 uniform mat4 uMvp;
