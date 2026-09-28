@@ -13,6 +13,7 @@ import java.net.URL
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.Semaphore
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -50,6 +51,17 @@ class TileLoader(
     private val failedAt = ConcurrentHashMap<SourcedTile, Long>()
     private val frame = AtomicLong(0)
 
+    /**
+     * Decoded tiles waiting for the GL thread. Each is 128–256 KB of native memory, and
+     * the GL thread uploads only while it draws, so without a limit they pile up (flying
+     * around, radar loop, app in the background) until the process runs out of memory.
+     * A worker waits here instead of decoding more; [uploaded] frees a place.
+     */
+    private val waiting = Semaphore(MAX_WAITING)
+
+    /** The GL thread took (or dropped) one decoded tile. */
+    fun uploaded() = waiting.release()
+
     init {
         pool.execute { trimDisk() }
     }
@@ -69,9 +81,13 @@ class TileLoader(
     }
 
     private fun run(t: SourcedTile) {
+        var holding = false
         try {
-            val stale = frame.get() - (lastWanted[t] ?: 0L) > STALE_FRAMES
-            if (stale) return
+            if (frame.get() - (lastWanted[t] ?: 0L) > STALE_FRAMES) return
+            waiting.acquire()
+            holding = true
+            // Waited: maybe the view has moved on meanwhile.
+            if (frame.get() - (lastWanted[t] ?: 0L) > STALE_FRAMES) return
             val bytes = if (t.source.bundled) {
                 runCatching { assets.open(t.source.url(t.key)).use { it.readBytes() } }.getOrNull() ?: return onAbsent(t)
             } else {
@@ -87,13 +103,34 @@ class TileLoader(
                 throw Failure("not an image (${bytes.size} bytes)")
             }
             failedAt.remove(t)
+            holding = false // the place now belongs to the queued bitmap until uploaded()
             onLoaded(t, bmp)
         } catch (e: Failure) {
             failedAt[t] = System.currentTimeMillis()
             onFailed(t, e.message ?: "unknown error")
+        } catch (e: InterruptedException) {
+            // Shutting down.
+        } catch (e: OutOfMemoryError) {
+            // Never let a worker die on this: the pool would try to start a new thread,
+            // which is exactly what fails when memory is short.
+            failedAt[t] = System.currentTimeMillis()
+            onFailed(t, "phone low on memory")
+        } catch (e: RuntimeException) {
+            failedAt[t] = System.currentTimeMillis()
+            onFailed(t, "${e.javaClass.simpleName}: ${e.message}")
         } finally {
+            if (holding) waiting.release()
             inFlight.remove(t)
+            if (lastWanted.size > 20_000) prune()
         }
+    }
+
+    /** Bookkeeping maps otherwise grow with every tile ever seen. */
+    private fun prune() {
+        val now = frame.get()
+        lastWanted.entries.removeIf { now - it.value > STALE_FRAMES }
+        val cut = System.currentTimeMillis() - RETRY_MS
+        failedAt.entries.removeIf { it.value < cut }
     }
 
     private class Failure(msg: String) : Exception(msg)
@@ -159,5 +196,7 @@ class TileLoader(
         private const val RETRY_MS = 20_000L
         private const val STALE_FRAMES = 120L
         private const val DISK_CAP = 500L * 1024 * 1024
+        /** At most this many decoded tiles in memory waiting for the GL thread (~8 MB). */
+        private const val MAX_WAITING = 32
     }
 }

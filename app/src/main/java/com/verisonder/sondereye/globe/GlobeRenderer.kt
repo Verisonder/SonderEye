@@ -158,7 +158,13 @@ class GlobeRenderer(
         GLES30.glViewport(0, 0, width, height)
     }
 
-    fun shutdown() = loader.shutdown()
+    fun shutdown() {
+        loader.shutdown()
+        while (true) {
+            val (_, bmp) = uploads.poll() ?: break
+            bmp.recycle()
+        }
+    }
 
     // ---- Frame ----------------------------------------------------------------------
 
@@ -290,9 +296,11 @@ class GlobeRenderer(
 
     private fun uploadPending() {
         while (true) absent.add(absentQueue.poll() ?: break)
+        if (absent.size > 20_000) absent.clear() // re-learned on demand; keeps memory flat
         var n = 0
         while (n < UPLOADS_PER_FRAME) {
             val (k, bmp) = uploads.poll() ?: break
+            loader.uploaded()
             if (!textures.containsKey(k)) {
                 val ids = IntArray(1)
                 GLES30.glGenTextures(1, ids, 0)
@@ -520,10 +528,22 @@ class GlobeRenderer(
 
     // ---- Helpers --------------------------------------------------------------------
 
+    /**
+     * One reused native buffer for per-frame data (markers, lines). A fresh direct buffer
+     * per draw is freed only when the Java heap happens to collect, so at 60 frames a
+     * second native memory climbs until the process runs out. GL thread only.
+     */
+    private var scratch: FloatBuffer = ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.nativeOrder()).asFloatBuffer()
+
     private fun floats(a: FloatArray, n: Int): FloatBuffer {
-        val fb = ByteBuffer.allocateDirect(n * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
-        fb.put(a, 0, n).position(0)
-        return fb
+        if (scratch.capacity() < n) {
+            var cap = scratch.capacity()
+            while (cap < n) cap *= 2
+            scratch = ByteBuffer.allocateDirect(cap * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        }
+        scratch.clear()
+        scratch.put(a, 0, n).position(0)
+        return scratch
     }
 
     private fun upload(vbo: Int, data: FloatArray) {
@@ -570,7 +590,7 @@ class GlobeRenderer(
         const val MAX_ZOOM = 20
         private const val SPLIT_PX = 384.0 // 256 px images shown at no more than 1.5×
         private const val TILE_LIMIT = 180
-        private const val TEXTURE_CAP = 420
+        private const val TEXTURE_CAP = 300 // up to ~70 MB of GPU memory, which phones share with RAM
         private const val MESH_CAP = 400
         private const val UPLOADS_PER_FRAME = 10
         private val UV_IDENTITY = doubleArrayOf(1.0, 0.0, 0.0)
