@@ -16,8 +16,15 @@ object Net {
 
     private const val TIMEOUT_MS = 15_000
 
+    /** A form POST (Overpass wants its query in the body). */
+    fun <T> post(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, body, parse)
+
     /** [what] names the source in messages ("Earthquakes", "Flights"…). */
-    fun <T> get(url: String, what: String, source: String, parse: (String) -> T): Outcome<T> {
+    fun <T> get(url: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, null, parse)
+
+    private fun <T> request(url: String, what: String, source: String, body: String?, parse: (String) -> T): Outcome<T> {
         val conn = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (e: IOException) {
@@ -28,6 +35,12 @@ object Net {
             conn.readTimeout = TIMEOUT_MS
             conn.setRequestProperty("Accept", "application/json, text/plain, */*")
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
+            if (body != null) {
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
             val code = conn.responseCode
             if (code == 429) return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)")
             if (code != 200) return Outcome.Failed("$what: $source answered HTTP $code")

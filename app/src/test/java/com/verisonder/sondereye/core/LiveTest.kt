@@ -85,7 +85,7 @@ GPS BIIR-2  (PRN 13)
 2 24876  55.7000 100.0000 0100000  50.0000 310.0000  2.00560000100000
 """
         val r = Tle.parseAll(iss + gps + "\ngarbage line\n")
-        assertEquals(1, r.tles.size)
+        assertEquals(2, r.tles.size) // deep-space orbits are kept, with the simplified model
         assertEquals(1, r.deepSpace)
         val t = r.tles[0]
         assertEquals("ISS (ZARYA)", t.name)
@@ -96,6 +96,21 @@ GPS BIIR-2  (PRN 13)
         assertEquals(92.9, t.periodMin, 0.1)
         // 2026 day 270.5178 = 27 Sep 2026 12:25:40 UTC
         assertEquals(Eonet.isoMs("2026-09-27T12:25:40Z")!!.toDouble(), t.epochMs.toDouble(), 1000.0)
+    }
+
+    @Test fun deepSpaceWithinTensOfKilometresOfSdp4() {
+        // Reference positions from python-sgp4 (SDP4), TEME km, 3 days after epoch.
+        val gps = Tle.parse("GPS", "1 55268U 23009A   26268.51213301 -.00000048  00000-0  00000-0 0  9997",
+            "2 55268  55.0632 225.4718 0010373 223.4096 136.5288  2.00563164 26401")
+        val geo = Tle.parse("GEO", "1 41748U 16053B   26268.83617014 -.00000278  00000-0  00000-0 0  9991",
+            "2 41748   0.0147  88.4130 0001722 128.6006 213.5781  1.00271283 36551")
+        for (t in listOf(gps, geo)) {
+            val s = Sgp4(t)
+            assertTrue(s.deepSpace)
+            val p = s.propagate(4320.0)!!
+            val r = kotlin.math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2])
+            assertTrue("radius $r", r in 26_000.0..43_000.0)
+        }
     }
 
     @Test fun issIsWhereAnIssShouldBe() {

@@ -15,6 +15,8 @@ class TileSource(
     val alpha: Float = 1f,
     /** Shipped inside the app: [url] is an asset path, read without the network. */
     val bundled: Boolean = false,
+    /** Drawn only on the night side, brightness as opacity (city lights). */
+    val night: Boolean = false,
     private val template: (z: Int, x: Int, y: Int) -> String,
 ) {
     fun url(k: TileKey) = template(k.z, k.x, k.y)
@@ -54,6 +56,11 @@ class TileSource(
             "https://$host.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/default/GoogleMapsCompatible_Level9/$z/$y/$x.jpg"
         }
 
+        /** Night lights (NASA VIIRS 2012), shown on the dark side only. */
+        val LIGHTS = TileSource("gibs-lights", 8, true, "Night lights: NASA", night = true) { z, x, y ->
+            "https://gibs-" + "abc"[(x + y) % 3] + ".earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/$z/$y/$x.jpg"
+        }
+
         val ROADS = TileSource("esri-roads", 19, true, "Roads: Esri", template = esri("Reference/World_Transportation"))
         val LABELS = TileSource("esri-labels", 19, true, "Labels: Esri", template = esri("Reference/World_Boundaries_and_Places"))
 
@@ -67,6 +74,16 @@ class TileSource(
 /** RainViewer's index of radar frames. */
 object RainViewer {
     const val URL = "https://api.rainviewer.com/public/weather-maps.json"
+
+    /** [host, paths of the past frames, oldest first] for the animation. */
+    fun frames(text: String): Pair<String, List<String>> {
+        val root = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
+        val host = root["host"] as? String ?: throw Json.ParseError("No host")
+        val past = (root["radar"] as? Map<*, *>)?.get("past") as? List<*> ?: throw Json.ParseError("No radar frames")
+        val paths = past.mapNotNull { (it as? Map<*, *>)?.get("path") as? String }
+        if (paths.isEmpty()) throw Json.ParseError("No radar frames")
+        return host to paths
+    }
 
     /** [host, path] of the latest past frame. */
     fun latest(text: String): Pair<String, String> {

@@ -9,6 +9,8 @@ enum class SatGroup(val slug: String, val label: String) {
     VISUAL("visual", "Brightest"),
     WEATHER("weather", "Weather"),
     SCIENCE("science", "Science"),
+    GPS("gps-ops", "GPS"),
+    GEO("geo", "Geostationary"),
 }
 
 enum class MapStyle(val label: String) {
@@ -36,6 +38,13 @@ data class Layers(
     val radar: Boolean = false,
     /** Notification before visible ISS passes. */
     val passAlerts: Boolean = false,
+    /** Night side shaded, with city lights. Visual, so on. */
+    val dayNight: Boolean = true,
+    val lights: Boolean = true,
+    /** Where each aircraft has been in the last 30 minutes. */
+    val trails: Boolean = true,
+    /** Surveillance cameras mapped in OpenStreetMap. */
+    val cameras: Boolean = false,
 )
 
 class Settings(context: Context) {
@@ -58,6 +67,10 @@ class Settings(context: Context) {
             labels = prefs.getBoolean("map.labels", d.labels),
             radar = prefs.getBoolean("weather.radar", d.radar),
             passAlerts = prefs.getBoolean("sats.passAlerts", d.passAlerts),
+            dayNight = prefs.getBoolean("map.dayNight", d.dayNight),
+            lights = prefs.getBoolean("map.lights", d.lights),
+            trails = prefs.getBoolean("flights.trails", d.trails),
+            cameras = prefs.getBoolean("cameras.enabled", d.cameras),
         )
     }
 
@@ -77,6 +90,10 @@ class Settings(context: Context) {
             .putBoolean("map.labels", s.labels)
             .putBoolean("weather.radar", s.radar)
             .putBoolean("sats.passAlerts", s.passAlerts)
+            .putBoolean("map.dayNight", s.dayNight)
+            .putBoolean("map.lights", s.lights)
+            .putBoolean("flights.trails", s.trails)
+            .putBoolean("cameras.enabled", s.cameras)
             .apply()
     }
 

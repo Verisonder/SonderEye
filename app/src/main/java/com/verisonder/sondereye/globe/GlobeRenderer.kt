@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
+import com.verisonder.sondereye.core.Astro
 import com.verisonder.sondereye.core.CameraState
 import com.verisonder.sondereye.core.Geo
 import com.verisonder.sondereye.core.M4
@@ -43,6 +44,9 @@ class Marker(
     }
 }
 
+/** A line through world space (an orbit, a flight's trail), metres. */
+class GlobeLine(val points: List<V3>, val rgb: Int, val alpha: Float = 1f)
+
 data class GlobeStatus(
     /** Tiles on screen still showing a blurrier parent or nothing. */
     val loading: Int,
@@ -67,8 +71,10 @@ class GlobeRenderer(
 
     @Volatile var markers: List<Marker> = emptyList()
     @Volatile var selectedKey: String? = null
-    /** A line through space (a satellite's orbit), in world metres; null for none. */
-    @Volatile var path: List<V3>? = null
+    /** Lines drawn over the globe: orbits, trails. */
+    @Volatile var lines: List<GlobeLine> = emptyList()
+    /** Shade the night side (and show night lights where that overlay is on). */
+    @Volatile var dayNight: Boolean = false
 
     /** The map underneath. */
     @Volatile var base: TileSource = TileSource.SATELLITE
@@ -179,20 +185,33 @@ class GlobeRenderer(
         val uHasTex = GLES30.glGetUniformLocation(tileProg, "uHasTex")
         val uColor = GLES30.glGetUniformLocation(tileProg, "uColor")
         val uAlpha = GLES30.glGetUniformLocation(tileProg, "uAlpha")
+        val uCenter = GLES30.glGetUniformLocation(tileProg, "uCenter")
+        val uSun = GLES30.glGetUniformLocation(tileProg, "uSun")
+        val uShade = GLES30.glGetUniformLocation(tileProg, "uShade")
+        val uMode = GLES30.glGetUniformLocation(tileProg, "uMode")
+        val shading = dayNight
+        val sun = Astro.sun(System.currentTimeMillis()).norm()
+        GLES30.glUniform3f(uSun, sun.x.toFloat(), sun.y.toFloat(), sun.z.toFloat())
+        GLES30.glUniform1f(uShade, if (shading) 1f else 0f)
+        GLES30.glUniform1f(uMode, 0f)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(tileProg, "uTex"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glUniform1f(uAlpha, 1f)
 
         val baseSrc = base
-        val overlaySrcs = overlays
+        // Night lights only make sense with the night side shaded.
+        val overlaySrcs = overlays.filter { !it.night || shading }
         // Base first, opaque; then each overlay over it on the same meshes.
         for ((pass, src) in (listOf(baseSrc) + overlaySrcs).withIndex()) {
-            if (pass == 1) {
+            if (pass >= 1) {
                 GLES30.glEnable(GLES30.GL_BLEND)
-                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                // Lights add to the dark ground; everything else is laid over it.
+                if (src.night) GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE)
+                else GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 GLES30.glDepthMask(false)
             }
             GLES30.glUniform1f(uAlpha, src.alpha)
+            GLES30.glUniform1f(uMode, if (src.night) 1f else 0f)
             for (k in tiles) {
                 val want = SourcedTile(src, src.keyFor(k))
                 var found: SourcedTile? = null
@@ -221,8 +240,10 @@ class GlobeRenderer(
                     if (bmFound != null && bmFound.key.z > (found?.key?.z ?: -1)) found = bmFound
                 }
                 if (found == null && src.transparent) continue // nothing to lay over this tile yet
-                M4.toFloat(view.mvp(k.center()), mvp)
+                val c = k.center()
+                M4.toFloat(view.mvp(c), mvp)
                 GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
+                GLES30.glUniform3f(uCenter, c.x.toFloat(), c.y.toFloat(), c.z.toFloat())
                 if (found != null) {
                     val uv = k.uvIn(found.key)
                     GLES30.glUniform3f(uUv, uv[0].toFloat(), uv[1].toFloat(), uv[2].toFloat())
@@ -239,9 +260,11 @@ class GlobeRenderer(
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDepthMask(true)
         GLES30.glUniform1f(uAlpha, 1f)
+        GLES30.glUniform1f(uMode, 0f)
 
-        drawCaps(view, uMvp, uHasTex, uColor)
-        drawPath(view, uMvp, uHasTex, uColor)
+        drawCaps(view, uMvp, uHasTex, uColor, uCenter)
+        GLES30.glUniform1f(uShade, 0f) // lines keep their colour day and night
+        drawLines(view, uMvp, uHasTex, uColor, uAlpha, uCenter)
         drawMarkers(view)
         trim(textures, TEXTURE_CAP) { GLES30.glDeleteTextures(1, intArrayOf(it), 0) }
         trim(meshes, MESH_CAP) { GLES30.glDeleteBuffers(1, intArrayOf(it), 0) }
@@ -360,7 +383,7 @@ class GlobeRenderer(
         upload(capVbo, out.toFloatArray())
     }
 
-    private fun drawCaps(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int) {
+    private fun drawCaps(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int, uCenter: Int) {
         GLES30.glUniform1f(uHasTex, 0f)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, capVbo)
         GLES30.glEnableVertexAttribArray(0)
@@ -370,7 +393,9 @@ class GlobeRenderer(
         for ((i, sign) in intArrayOf(1, -1).withIndex()) {
             val c = capRgb[i]
             GLES30.glUniform3f(uColor, c[0], c[1], c[2])
-            M4.toFloat(view.mvp(Geo.ecef(90.0 * sign, 0.0)), mvp)
+            val pole = Geo.ecef(90.0 * sign, 0.0)
+            GLES30.glUniform3f(uCenter, pole.x.toFloat(), pole.y.toFloat(), pole.z.toFloat())
+            M4.toFloat(view.mvp(pole), mvp)
             GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLES, i * capCount, capCount)
         }
@@ -445,33 +470,45 @@ class GlobeRenderer(
         GLES30.glDepthMask(true)
     }
 
-    // ---- Orbit line -----------------------------------------------------------------
+    // ---- Lines (orbits, trails) --------------------------------------------------------
 
     private var pathVbo = 0
 
-    private fun drawPath(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int) {
-        val pts = path ?: return
-        if (pts.size < 2) return
+    private fun drawLines(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int, uAlpha: Int, uCenter: Int) {
+        val all = lines
+        if (all.isEmpty()) return
         if (pathVbo == 0) {
             val ids = IntArray(1); GLES30.glGenBuffers(1, ids, 0); pathVbo = ids[0]
         }
         val eye = view.eye
-        val data = FloatArray(pts.size * 5)
-        var o = 0
-        for (p in pts) {
-            data[o++] = (p.x - eye.x).toFloat(); data[o++] = (p.y - eye.y).toFloat(); data[o++] = (p.z - eye.z).toFloat()
-            data[o++] = 0f; data[o++] = 0f
-        }
-        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pathVbo)
-        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.size * 4, floats(data, data.size), GLES30.GL_STREAM_DRAW)
-        GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 20, 0)
-        GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 20, 12)
         M4.toFloat(view.projRot, mvp)
         GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
         GLES30.glUniform1f(uHasTex, 0f)
-        GLES30.glUniform3f(uColor, 0.31f, 0.76f, 0.97f)
+        GLES30.glUniform3f(uCenter, eye.x.toFloat(), eye.y.toFloat(), eye.z.toFloat())
         GLES30.glLineWidth(lineWidth)
-        GLES30.glDrawArrays(GLES30.GL_LINE_STRIP, 0, pts.size)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glDepthMask(false)
+        for (line in all) {
+            val pts = line.points
+            if (pts.size < 2) continue
+            val data = FloatArray(pts.size * 5)
+            var o = 0
+            for (p in pts) {
+                data[o++] = (p.x - eye.x).toFloat(); data[o++] = (p.y - eye.y).toFloat(); data[o++] = (p.z - eye.z).toFloat()
+                data[o++] = 0f; data[o++] = 0f
+            }
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pathVbo)
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.size * 4, floats(data, data.size), GLES30.GL_STREAM_DRAW)
+            GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 20, 0)
+            GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 20, 12)
+            GLES30.glUniform3f(uColor, ((line.rgb shr 16) and 0xFF) / 255f, ((line.rgb shr 8) and 0xFF) / 255f, (line.rgb and 0xFF) / 255f)
+            GLES30.glUniform1f(uAlpha, line.alpha)
+            GLES30.glDrawArrays(GLES30.GL_LINE_STRIP, 0, pts.size)
+        }
+        GLES30.glUniform1f(uAlpha, 1f)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
     }
 
     /** 2 dp, within what this GPU can draw (many only do 1 px). */
@@ -545,11 +582,14 @@ class GlobeRenderer(
         private const val TILE_VS = """#version 300 es
 uniform mat4 uMvp;
 uniform vec3 uUv;
+uniform vec3 uCenter; // world position the vertices are relative to
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec2 aUv;
 out vec2 vUv;
+out vec3 vNormal;
 void main() {
     vUv = aUv * uUv.x + uUv.yz;
+    vNormal = uCenter + aPos; // only its direction is used: float is plenty
     gl_Position = uMvp * vec4(aPos, 1.0);
 }"""
 
@@ -559,15 +599,23 @@ uniform sampler2D uTex;
 uniform float uHasTex;
 uniform vec3 uColor;
 uniform float uAlpha;
+uniform vec3 uSun;    // unit vector toward the Sun, world frame
+uniform float uShade; // 1: darken the night side
+uniform float uMode;  // 1: night lights (brightness as opacity, night side only)
 in vec2 vUv;
+in vec3 vNormal;
 out vec4 outColor;
 void main() {
-    if (uHasTex > 0.5) {
-        vec4 t = texture(uTex, vUv);
-        outColor = vec4(t.rgb, t.a * uAlpha);
-    } else {
-        outColor = vec4(uColor, 1.0);
+    vec4 c = uHasTex > 0.5 ? texture(uTex, vUv) : vec4(uColor, 1.0);
+    // 0 on the night side, 1 in daylight, with a twilight band across the terminator.
+    float day = smoothstep(-0.10, 0.08, dot(normalize(vNormal), uSun));
+    if (uMode > 0.5) {
+        float glow = max(c.r, max(c.g, c.b));
+        outColor = vec4(c.rgb * vec3(1.0, 0.92, 0.75), glow * (1.0 - day) * uAlpha);
+        return;
     }
+    float light = mix(1.0, mix(0.16, 1.0, day), uShade);
+    outColor = vec4(c.rgb * light, c.a * uAlpha);
 }"""
 
         private const val POINT_VS = """#version 300 es

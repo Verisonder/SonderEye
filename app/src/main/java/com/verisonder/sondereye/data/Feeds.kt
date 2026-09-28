@@ -2,7 +2,11 @@ package com.verisonder.sondereye.data
 
 import com.verisonder.sondereye.core.Adsb
 import com.verisonder.sondereye.core.Eonet
+import com.verisonder.sondereye.core.ForecastApi
+import com.verisonder.sondereye.core.Lookup
 import com.verisonder.sondereye.core.MinMag
+import com.verisonder.sondereye.core.Nominatim
+import com.verisonder.sondereye.core.Overpass
 import com.verisonder.sondereye.core.OpenMeteo
 import com.verisonder.sondereye.core.RainViewer
 import com.verisonder.sondereye.core.Period
@@ -23,8 +27,19 @@ object Feeds {
 
     fun weather(lat: Double, lon: Double) = Net.get(OpenMeteo.url(lat, lon), "Weather", "Open-Meteo", OpenMeteo::parse)
 
-    /** Latest radar frame: [host, path] for the tile URLs. */
-    fun radar() = Net.get(RainViewer.URL, "Rain radar", "RainViewer", RainViewer::latest)
+    /** Radar frames: host and the past frame paths, oldest first. */
+    fun radar() = Net.get(RainViewer.URL, "Rain radar", "RainViewer", RainViewer::frames)
+
+    fun forecast(lat: Double, lon: Double) = Net.get(ForecastApi.url(lat, lon), "Weather", "Open-Meteo", ForecastApi::parse)
+
+    fun places(q: String) = Net.get(Nominatim.url(q), "Search", "OpenStreetMap", Nominatim::parse)
+
+    fun callsign(cs: String) = Net.get(Lookup.callsignUrl(cs), "Search", "adsb.lol", Adsb::parse)
+
+    fun satellitesNamed(q: String) = Net.get(Lookup.satelliteUrl(q), "Search", "CelesTrak") { Tle.parseAll(it) }
+
+    fun cameras(s: Double, w: Double, n: Double, e: Double) =
+        Net.post(Overpass.URL, Overpass.cameraQuery(s, w, n, e), "Cameras", "OpenStreetMap Overpass", Overpass::parseCameras)
 
     /**
      * Orbital elements, cached on disk for 2 hours as CelesTrak asks. When a download

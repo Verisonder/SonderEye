@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -50,6 +51,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,10 +72,15 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.EARTH_R
+import com.verisonder.sondereye.core.Forecast
 import com.verisonder.sondereye.core.Flight
 import com.verisonder.sondereye.core.Fmt
 import com.verisonder.sondereye.core.MinMag
@@ -102,6 +110,12 @@ class Actions(
     val myLocation: () -> Unit,
     val fixLocation: () -> Unit,
     val sky: () -> Unit,
+    val search: (String) -> Unit,
+    val pick: (Hit) -> Unit,
+    /** Follow the aircraft with this hex, or stop (null). */
+    val follow: (String?) -> Unit,
+    val clearCache: () -> Unit,
+    val measureCache: () -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -118,8 +132,12 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
     }
 
-    BackHandler(enabled = state.layersOpen || state.selected != null) {
-        if (state.layersOpen) state.layersOpen = false else actions.select(null)
+    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open) {
+        when {
+            state.search.open -> state.search.open = false
+            state.layersOpen -> state.layersOpen = false
+            else -> actions.select(null)
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Palette.space)) {
@@ -151,7 +169,11 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             StatusCard(state, actions, Modifier.weight(1f))
             Spacer(Modifier.width(10.dp))
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RoundButton(Icons.Default.Menu, "Layers") { state.layersOpen = !state.layersOpen }
+                RoundButton(Icons.Default.Menu, "Layers") {
+                    state.layersOpen = !state.layersOpen
+                    if (state.layersOpen) actions.measureCache()
+                }
+                RoundButton(Icons.Default.Search, "Search") { state.search.open = !state.search.open }
                 val busy = state.quakes.loading || state.events.loading || state.sats.loading ||
                     (state.flights.loading && state.flights.updatedAt == null)
                 if (busy) {
@@ -185,6 +207,17 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             last.sel?.let { SelectionCard(it, state, now, actions) }
         }
 
+        if (state.search.open) {
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(top = 12.dp, end = 66.dp, start = 12.dp)
+            ) {
+                SearchPanel(state.search, actions)
+            }
+        }
+
         if (state.layersOpen) {
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { state.layersOpen = false } })
             Box(
@@ -193,7 +226,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(top = 12.dp, end = 66.dp, start = 12.dp)
             ) {
-                LayersPanel(state.layers, actions.change)
+                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache)
             }
         }
     }
@@ -242,7 +275,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 if (s.updatedAt == null && s.loading) "Loading satellites…" else count(s.items.size, "satellite"),
                 buildString {
                     append(l.satGroup.label.lowercase())
-                    if (state.satsDeep > 0) append(", ${state.satsDeep} high-orbit not shown")
+                    if (state.satsDeep > 0) append(", ${state.satsDeep} high-orbit (approximate)")
                 },
             )
         }
@@ -257,7 +290,25 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
         if (l.radar) {
             any = true
-            LayerLine(Color(0xFF3FA7FF), "Rain radar", if (state.radar.updatedAt == null) "loading…" else "latest 10-minute frame, ${clock(state.radar.updatedAt!!)}")
+            val at = state.radarFrameAt
+            LayerLine(Color(0xFF3FA7FF), "Rain radar", if (at == null) "loading…" else "past hour, now showing ${clock(at)}")
+        }
+        if (l.cameras) {
+            any = true
+            val c = state.cameras
+            LayerLine(
+                Palette.alpr,
+                state.camerasNote?.let { "Cameras" } ?: if (c.loading && c.updatedAt == null) "Loading cameras…" else count(c.items.size, "camera"),
+                state.camerasNote ?: "${c.items.count { it.alpr }} plate readers, OpenStreetMap",
+            )
+        }
+        state.following?.let { hex ->
+            val f = state.flights.items.firstOrNull { it.hex == hex }
+            Text(
+                "Following ${f?.callsign ?: hex.uppercase()}. Tap to stop.",
+                color = Palette.accent, fontSize = 13.sp,
+                modifier = Modifier.clickable { actions.follow(null) },
+            )
         }
         if (!any) Text("All layers off", color = Palette.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         if (l.location && state.me == null && state.meProblem == null) {
@@ -270,7 +321,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
         state.alertProblem?.let { ErrorLine(it, null) }
@@ -330,7 +381,8 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
         Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
             when (sel) {
                 is Sel.OfQuake -> QuakeBody(sel.q, now, context, close)
-                is Sel.OfFlight -> FlightBody(sel.f, context, close)
+                is Sel.OfFlight -> FlightBody(sel.f, state, actions, context, close)
+                is Sel.OfCamera -> CameraBody(sel.c, context, close)
                 is Sel.OfSat -> SatBody(sel.s, state, actions, close)
                 is Sel.OfEvent -> EventBody(sel.e, now, context, close)
                 is Sel.OfPlace -> PlaceBody(sel, state, close)
@@ -378,7 +430,17 @@ private fun ColumnScope.QuakeBody(q: Quake, now: Long, context: Context, onClose
 }
 
 @Composable
-private fun ColumnScope.FlightBody(f: Flight, context: Context, onClose: () -> Unit) {
+private fun ColumnScope.CameraBody(c: Camera, context: Context, onClose: () -> Unit) {
+    Header(
+        null, if (c.alpr) Palette.alpr else Palette.camera,
+        if (c.alpr) "Licence-plate reader" else "Surveillance camera",
+        listOfNotNull(c.operator, c.direction?.let { "facing ${Sky.compass(it)}" }).joinToString(", "), onClose,
+    )
+    LinkRow("Mapped by OpenStreetMap volunteers", "Open in OSM") { openUrl(context, "https://www.openstreetmap.org/node/${c.id}") }
+}
+
+@Composable
+private fun ColumnScope.FlightBody(f: Flight, state: EyeState, actions: Actions, context: Context, onClose: () -> Unit) {
     val sub = listOfNotNull(f.type, f.registration).joinToString(", ").ifEmpty { "ICAO ${f.hex.uppercase()}" }
     Header(null, Palette.text, f.callsign ?: f.hex.uppercase(), sub, onClose)
     val alt = when {
@@ -388,7 +450,14 @@ private fun ColumnScope.FlightBody(f: Flight, context: Context, onClose: () -> U
     }
     val parts = listOfNotNull(alt, f.speedKt?.let { "${it.roundToInt()} kt" }, f.track?.let { "heading ${it.roundToInt()}°" })
     Line(parts.joinToString(", "))
-    LinkRow("From adsb.lol, every 10 s", "Open on adsb.lol") { openUrl(context, "https://globe.adsb.lol/?icao=${f.hex}") }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        val on = state.following == f.hex
+        TextButton(onClick = { actions.follow(if (on) null else f.hex) }) {
+            Text(if (on) "Stop following" else "Follow", color = Palette.accent)
+        }
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = { openUrl(context, "https://globe.adsb.lol/?icao=${f.hex}") }) { Text("Open on adsb.lol", color = Palette.accent) }
+    }
 }
 
 @Composable
@@ -399,6 +468,12 @@ private fun ColumnScope.SatBody(s: Sgp4, state: EyeState, actions: Actions, onCl
     val speed = s.speedAt(t)
     Header(null, Palette.satellite, s.tle.name, "NORAD ${s.tle.norad}, one orbit every ${s.tle.periodMin.roundToInt()} min", onClose)
     Line(if (alt == null) "Decayed: the orbit data puts it below the surface" else "$alt km up, ${"%.2f".format(speed ?: 0.0)} km/s")
+    if (s.deepSpace) Line("High orbit: position approximate, within about 50 km")
+    val me = state.me
+    if (me != null && p != null) {
+        val a = Sky.lookAngles(me.latitude, me.longitude, p)
+        Line(if (a[0] > 0) "Now ${a[0].roundToInt()}° above your horizon, towards ${Sky.compass(a[1])}" else "Now below your horizon")
+    }
 
     Spacer(Modifier.size(6.dp))
     val passes = state.passes
@@ -462,8 +537,35 @@ private fun WeatherLines(state: EyeState) {
                 color = Palette.text, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp),
             )
             Line(weatherDetail(data))
-            Line("From Open-Meteo, now")
+            w.forecast?.let { ForecastView(it) }
+            Line("From Open-Meteo")
         }
+    }
+}
+
+@Composable
+private fun ForecastView(f: Forecast) {
+    // Next 12 hours, every 2 hours, side by side; then the next days.
+    Row(
+        Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        for (h in f.hours.take(13).filterIndexed { i, _ -> i % 2 == 0 }) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(h.timeLocal.substringAfter('T').take(5), color = Palette.dim, fontSize = 12.sp)
+                Text("${h.tempC.roundToInt()}°", color = Palette.text, fontSize = 15.sp)
+                Text(h.rainChance?.let { "$it%" } ?: "", color = Color(0xFF3FA7FF), fontSize = 11.sp)
+            }
+        }
+    }
+    for (d in f.days.drop(1).take(3)) {
+        val day = runCatching {
+            SimpleDateFormat("EEE", Locale.getDefault()).format(SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).parse(d.dateLocal)!!)
+        }.getOrDefault(d.dateLocal)
+        Line(
+            "$day  ${d.maxC.roundToInt()}° / ${d.minC.roundToInt()}°, ${Weather(0.0, null, d.code, null, null, null, null).description.lowercase()}" +
+                (d.rainChance?.let { ", rain $it%" } ?: ""),
+        )
     }
 }
 
@@ -474,10 +576,52 @@ private fun weatherDetail(w: Weather): String = listOfNotNull(
     w.precipMm?.takeIf { it > 0 }?.let { "rain %.1f mm".format(it) },
 ).joinToString(", ").replaceFirstChar { it.uppercase() }
 
+// ---- Search ----------------------------------------------------------------------------------
+
+@Composable
+private fun SearchPanel(se: SearchState, actions: Actions) {
+    Surface(
+        color = Palette.panel,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            OutlinedTextField(
+                value = se.query,
+                onValueChange = { se.query = it },
+                singleLine = true,
+                placeholder = { Text("Place, flight (RAM101) or satellite", color = Palette.dim) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { actions.search(se.query) }),
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (se.busy) Text("Searching…", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            for (e in se.errors) Text(e, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+            if (!se.busy && se.searched && se.hits.isEmpty() && se.errors.isEmpty()) {
+                Text("Nothing found.", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                for (h in se.hits) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { actions.pick(h) }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                    ) {
+                        Text(h.title, color = Palette.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(h.detail, color = Palette.dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ---- Layers panel ----------------------------------------------------------------------------
 
 @Composable
-private fun LayersPanel(s: Layers, change: (Layers) -> Unit) {
+private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, clearCache: () -> Unit) {
     Surface(
         color = Palette.panel,
         shape = RoundedCornerShape(20.dp),
@@ -509,12 +653,15 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit) {
                 Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
                 Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }
             }
+            Toggle("Day and night", s.dayNight, true) { change(s.copy(dayNight = it)) }
+            Toggle("City lights at night", s.lights, s.dayNight) { change(s.copy(lights = it)) }
 
             Divider()
             Section("Rain radar", "RainViewer, last 10 minutes; long-press anywhere for its weather", s.radar) { change(s.copy(radar = it)) }
 
             Divider()
             Section("Flights", "adsb.lol, near the screen centre, every 10 s", s.flights) { change(s.copy(flights = it)) }
+            Toggle("Trails (last 30 min)", s.trails, s.flights) { change(s.copy(trails = it)) }
 
             Divider()
             Section("Satellites", "CelesTrak orbits, positions computed live", s.satellites) { change(s.copy(satellites = it)) }
@@ -528,7 +675,22 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit) {
             Section("Natural events", "NASA EONET: fires, volcanoes, storms, ice", s.events) { change(s.copy(events = it)) }
 
             Divider()
+            Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
+
+            Divider()
             Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
+
+            Divider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Map cache", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        cacheBytes?.let { "%.1f MB of map tiles on this phone".format(it / 1e6) } ?: "Measuring…",
+                        color = Palette.dim, fontSize = 12.sp,
+                    )
+                }
+                TextButton(onClick = clearCache, enabled = (cacheBytes ?: 0) > 0) { Text("Clear", color = Palette.accent) }
+            }
         }
     }
 }

@@ -13,8 +13,12 @@ import kotlin.math.sqrt
 /**
  * Satellites, computed on the phone from public orbital elements (CelesTrak TLEs).
  * SGP4 for near-Earth orbits (period under 225 min), following Vallado's reference
- * implementation with WGS-72 constants, the ones TLEs are fitted with. Deep-space orbits
- * need SDP4 and are skipped by [Tle.parseAll] (counted, not silently dropped).
+ * implementation with WGS-72 constants, the ones TLEs are fitted with.
+ *
+ * Deep-space orbits (period 225 min or more: GPS, geostationary…) use a simplified model
+ * instead of SDP4: two-body motion with the J2 secular drift of the node, perigee and
+ * mean anomaly. Near the element epoch it agrees with SDP4 to tens of kilometres, which
+ * is invisible at those altitudes on a globe; it is for display, not for precise work.
  */
 class Tle(
     val name: String,
@@ -46,11 +50,11 @@ class Tle(
                 if (a.startsWith("1 ") && i + 1 < lines.size && lines[i + 1].startsWith("2 ")) {
                     // Two-line set without a name line.
                     val t = runCatching { parse("", a, lines[i + 1]) }.getOrNull()
-                    if (t == null) bad++ else if (t.periodMin >= 225) deep++ else out.add(t)
+                    if (t == null) bad++ else { if (t.periodMin >= 225) deep++; out.add(t) }
                     i += 2
                 } else if (i + 2 < lines.size && lines[i + 1].startsWith("1 ") && lines[i + 2].startsWith("2 ")) {
                     val t = runCatching { parse(a.trim(), lines[i + 1], lines[i + 2]) }.getOrNull()
-                    if (t == null) bad++ else if (t.periodMin >= 225) deep++ else out.add(t)
+                    if (t == null) bad++ else { if (t.periodMin >= 225) deep++; out.add(t) }
                     i += 3
                 } else {
                     i++
@@ -227,8 +231,45 @@ class Sgp4(val tle: Tle) {
         }
     }
 
+    val deepSpace = tle.periodMin >= 225
+
     /** TEME position (km) and velocity (km/s) [tsince] minutes after epoch, or null if decayed. */
-    fun propagate(tsince: Double): DoubleArray? {
+    fun propagate(tsince: Double): DoubleArray? = if (deepSpace) kepler(tsince) else sgp4(tsince)
+
+    /** Simplified deep-space model (see the class comment). */
+    private fun kepler(t: Double): DoubleArray {
+        val a = (XKE / no).pow(x2o3) // earth radii
+        val p = a * (1 - ecco * ecco)
+        val n = no
+        val cosi = cos(inclo)
+        val k = 1.5 * J2 / (p * p) * n
+        val raan = nodeo - k * cosi * t
+        val argp = argpo + k * (2 - 2.5 * (1 - cosi * cosi)) * t
+        val m = mo + (n + k * sqrt(1 - ecco * ecco) * (1 - 1.5 * (1 - cosi * cosi))) * t
+        var e = m
+        repeat(12) { e -= (e - ecco * sin(e) - m) / (1 - ecco * cos(e)) }
+        val cosE = cos(e); val sinE = sin(e)
+        val r = a * (1 - ecco * cosE)
+        val xp = a * (cosE - ecco)
+        val yp = a * sqrt(1 - ecco * ecco) * sinE
+        val rdot = sqrt(a) * XKE * ecco * sinE / r            // earth radii per minute
+        val rfdot = sqrt(a * (1 - ecco * ecco)) * XKE / r
+        val nu = atan2(yp, xp)
+        val vx = rdot * cos(nu) - rfdot * sin(nu)
+        val vy = rdot * sin(nu) + rfdot * cos(nu)
+        val co = cos(raan); val so = sin(raan); val cw = cos(argp); val sw = sin(argp); val si = sin(inclo)
+        val px = co * cw - so * sw * cosi; val py = so * cw + co * sw * cosi; val pz = sw * si
+        val qx = -co * sw - so * cw * cosi; val qy = -so * sw + co * cw * cosi; val qz = cw * si
+        val rr = r * RE
+        val x = xp / r * rr; val y = yp / r * rr
+        val vk = RE / 60.0
+        return doubleArrayOf(
+            x * px + y * qx, x * py + y * qy, x * pz + y * qz,
+            (vx * px + vy * qx) * vk, (vx * py + vy * qy) * vk, (vx * pz + vy * qz) * vk,
+        )
+    }
+
+    private fun sgp4(tsince: Double): DoubleArray? {
         val t = tsince
         val xmdf = mo + mdot * t
         val argpdf = argpo + argpdot * t

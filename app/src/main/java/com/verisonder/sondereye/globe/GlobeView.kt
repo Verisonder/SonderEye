@@ -27,6 +27,8 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     interface Listener {
         /** A marker was tapped (its key), or empty globe (null). */
         fun onTap(key: String?)
+        /** The user moved the map by hand (stops following a plane). */
+        fun onUserGesture() {}
         /** Long press on the ground: (lat, lon). */
         fun onLongPress(lat: Double, lon: Double)
         fun onStatus(status: GlobeStatus)
@@ -90,9 +92,27 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     fun flyTo(lat: Double, lon: Double, alt: Double) = flyTo(cam.copy(lat = lat, lon = lon, alt = alt))
 
-    /** A line in space, world metres (a satellite's orbit); null clears it. */
-    fun setPath(points: List<com.verisonder.sondereye.core.V3>?) {
-        renderer.path = points
+    /** Centres on (lat, lon) at once, keeping height and heading (following something). */
+    fun lookAt(lat: Double, lon: Double) {
+        if (animation != null) return // let a fly-to finish first
+        setCam(cam.copy(lat = lat, lon = lon))
+    }
+
+    private val lineGroups = LinkedHashMap<String, List<GlobeLine>>()
+
+    /** Replaces one named group of lines (the orbit, the trails). */
+    fun setLines(name: String, lines: List<GlobeLine>) {
+        lineGroups[name] = lines
+        renderer.lines = lineGroups.values.flatten()
+        requestRender()
+    }
+
+    /** A satellite's orbit, or null to clear it. */
+    fun setPath(points: List<com.verisonder.sondereye.core.V3>?) =
+        setLines("orbit", if (points == null) emptyList() else listOf(GlobeLine(points, 0xFF4FC3F7.toInt())))
+
+    fun setDayNight(on: Boolean) {
+        renderer.dayNight = on
         requestRender()
     }
 
@@ -290,6 +310,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
                 lastX = fx; lastY = fy; lastAngle = angle; tracking = true
             }
             MotionEvent.ACTION_MOVE -> if (tracking) {
+                if (hypot((fx - lastX).toDouble(), (fy - lastY).toDouble()) > 3.0 || used >= 2) listener.onUserGesture()
                 drag(lastX, lastY, fx, fy)
                 if (!angle.isNaN() && !lastAngle.isNaN()) {
                     val d = Geo.toDeg(angle - lastAngle)

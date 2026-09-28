@@ -23,7 +23,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.EARTH_R
+import com.verisonder.sondereye.core.Forecast
+import com.verisonder.sondereye.core.Motion
+import com.verisonder.sondereye.core.Place
 import com.verisonder.sondereye.core.Flight
 import com.verisonder.sondereye.core.Geo
 import com.verisonder.sondereye.core.NatEvent
@@ -41,6 +45,7 @@ import com.verisonder.sondereye.data.MapStyle
 import com.verisonder.sondereye.data.Net
 import com.verisonder.sondereye.data.Settings
 import com.verisonder.sondereye.data.Where
+import com.verisonder.sondereye.globe.GlobeLine
 import com.verisonder.sondereye.globe.GlobeStatus
 import com.verisonder.sondereye.globe.GlobeView
 import com.verisonder.sondereye.globe.Marker
@@ -71,6 +76,7 @@ sealed class Sel(val key: String) {
     class OfSat(val s: Sgp4) : Sel("s:" + s.tle.norad)
     class OfEvent(val e: NatEvent) : Sel("e:" + e.id)
     object Me : Sel("me")
+    class OfCamera(val c: Camera) : Sel("c:" + c.id)
     /** A spot picked by a long press, for its weather. */
     class OfPlace(val lat: Double, val lon: Double) : Sel("p:%.4f,%.4f".format(java.util.Locale.ROOT, lat, lon))
 }
@@ -78,7 +84,24 @@ sealed class Sel(val key: String) {
 /** Weather for the selected spot (or for you). */
 class WeatherState(val key: String) {
     var weather by mutableStateOf<Weather?>(null)
+    var forecast by mutableStateOf<Forecast?>(null)
     var error by mutableStateOf<String?>(null)
+}
+
+/** One search hit. */
+sealed class Hit(val title: String, val detail: String) {
+    class OfPlace(val p: Place) : Hit(p.name, p.detail)
+    class OfFlight(val f: Flight) : Hit(f.callsign ?: f.hex.uppercase(), listOfNotNull("Flight", f.type, f.registration).joinToString(", "))
+    class OfSat(val s: Sgp4) : Hit(s.tle.name, "Satellite, NORAD ${s.tle.norad}")
+}
+
+class SearchState {
+    var open by mutableStateOf(false)
+    var query by mutableStateOf("")
+    var hits by mutableStateOf<List<Hit>>(emptyList())
+    var busy by mutableStateOf(false)
+    var errors by mutableStateOf<List<String>>(emptyList())
+    var searched by mutableStateOf(false)
 }
 
 /** Everything the screen shows. Plain Compose state; the activity survives rotation (manifest). */
@@ -104,6 +127,18 @@ class EyeState {
     var alertProblem by mutableStateOf<String?>(null)
     /** Credits for the map layers on screen, as the providers ask. */
     var credits by mutableStateOf(listOf(TileSource.SATELLITE.credit))
+    val cameras = Feed<Camera>()
+    /** Why cameras are not loading right now (too far out), shown dimly. */
+    var camerasNote by mutableStateOf<String?>(null)
+    /** Hex of the aircraft the camera follows. */
+    var following by mutableStateOf<String?>(null)
+    val search = SearchState()
+    /** Time of the radar frame on screen. */
+    var radarFrameAt by mutableStateOf<Long?>(null)
+    /** Bytes of map tiles on the phone (shown in the menu). */
+    var cacheBytes by mutableStateOf<Long?>(null)
+    /** Satellites added by a search, drawn even when their group is not shown. */
+    var extraSats by mutableStateOf<List<Sgp4>>(emptyList())
     var layersOpen by mutableStateOf(false)
     /** Wall clock for moving things, ticking once a second while the app is on screen. */
     var clock by mutableLongStateOf(System.currentTimeMillis())
@@ -117,6 +152,8 @@ class MainActivity : ComponentActivity() {
     private var globe: GlobeView? = null
     private val jobs = HashMap<String, Job>()
     private var flyToMeOnFix = false
+    /** Radar frame path on screen (null: the latest). */
+    private var radarFrame: String? = null
     /** Android stops showing the permission dialog after repeated denials. */
     private var locationBlocked = false
 
@@ -167,6 +204,7 @@ class MainActivity : ComponentActivity() {
         if (gl >= 0x30000) {
             globe = GlobeView(this, object : GlobeView.Listener {
                 override fun onTap(key: String?) = select(key?.let(::selectionFor))
+                override fun onUserGesture() { state.following = null }
                 override fun onLongPress(lat: Double, lon: Double) {
                     val sel = Sel.OfPlace(lat, lon)
                     select(sel)
@@ -177,7 +215,7 @@ class MainActivity : ComponentActivity() {
                 override fun onError(message: String) { state.globeError = message }
             })
             // Fixes the draw order: later layers on top.
-            for (name in listOf("quakes", "events", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
+            for (name in listOf("quakes", "events", "cameras", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
         } else {
             state.globeError = "Globe: this phone reports OpenGL ES ${gl shr 16}.${gl and 0xFFFF}; 3.0 is required"
@@ -203,6 +241,14 @@ class MainActivity : ComponentActivity() {
                         myLocation = ::myLocation,
                         fixLocation = ::fixLocation,
                         sky = { startActivity(Intent(this, SkyActivity::class.java)) },
+                        search = ::search,
+                        pick = ::pick,
+                        follow = { hex ->
+                            state.following = hex
+                            if (hex != null) flightAt(hex, System.currentTimeMillis())?.let { globe?.flyTo(it[0], it[1], globe!!.center()[2].coerceAtMost(300_000.0)) }
+                        },
+                        clearCache = ::clearCache,
+                        measureCache = ::measureCache,
                     ),
                 )
             }
@@ -210,6 +256,24 @@ class MainActivity : ComponentActivity() {
 
         refreshAll()
         if (state.layers.passAlerts) schedulePassAlerts()
+
+        // Radar animation: the past hour's frames in a loop, holding on the latest.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                var i = 0
+                while (true) {
+                    val frames = state.radar.items.drop(1).takeLast(RADAR_FRAMES)
+                    if (state.layers.radar && frames.isNotEmpty()) {
+                        i = (i + 1) % frames.size
+                        radarFrame = frames[i]
+                        applyMap()
+                        delay(if (i == frames.size - 1) 1800 else 600)
+                    } else {
+                        delay(1000)
+                    }
+                }
+            }
+        }
 
         // Everything below runs only while the app is on screen. Nothing in the background.
         lifecycleScope.launch {
@@ -221,9 +285,11 @@ class MainActivity : ComponentActivity() {
                         val l = state.layers
                         val now = System.currentTimeMillis()
                         state.clock = now
-                        if (l.satellites && state.sats.items.isNotEmpty()) updateSatellites(now, orbit = tick % 30 == 0L)
+                        if ((l.satellites && state.sats.items.isNotEmpty()) || state.extraSats.isNotEmpty()) updateSatellites(now, orbit = tick % 30 == 0L)
                         if (l.flights && !state.flights.loading && now - state.flights.attemptAt >= FLIGHTS_MS) loadFlights()
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
+                        if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
+                        if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
                         if (l.quakes && l.autoRefresh && !state.quakes.loading && now - state.quakes.attemptAt >= QUAKES_AUTO_MS) loadQuakes()
                         tick++
                         delay(1000)
@@ -245,7 +311,11 @@ class MainActivity : ComponentActivity() {
         if (new.flights != old.flights) loadFlights()
         if (new.satellites != old.satellites || new.satGroup != old.satGroup) loadSatellites()
         if (new.events != old.events) loadEvents()
-        if (new.map != old.map || new.roads != old.roads || new.labels != old.labels) applyMap()
+        if (new.map != old.map || new.roads != old.roads || new.labels != old.labels ||
+            new.dayNight != old.dayNight || new.lights != old.lights
+        ) applyMap()
+        if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
+        if (new.cameras != old.cameras) loadCameras()
         if (new.radar != old.radar) loadRadar()
         if (new.passAlerts != old.passAlerts) {
             if (new.passAlerts) enablePassAlerts() else {
@@ -286,9 +356,15 @@ class MainActivity : ComponentActivity() {
         // Streets already draws its own roads and names.
         if (l.map != MapStyle.STREETS && l.roads) overlays.add(TileSource.ROADS)
         if (l.map != MapStyle.STREETS && l.labels) overlays.add(TileSource.LABELS)
+        if (l.dayNight && l.lights) overlays.add(0, TileSource.LIGHTS)
         val r = state.radar.items
-        if (l.radar && r.size == 2) overlays.add(TileSource.radar(r[0], r[1]))
+        val frame = radarFrame ?: r.lastOrNull()
+        if (l.radar && r.size >= 2 && frame != null) {
+            overlays.add(TileSource.radar(r[0], frame))
+            state.radarFrameAt = frame.substringAfterLast('/').toLongOrNull()?.times(1000)
+        }
         globe?.setMap(base, overlays)
+        globe?.setDayNight(l.dayNight)
         state.credits = (listOf(base) + overlays + TileSource.BLUE_MARBLE).map { it.credit }.distinct()
     }
 
@@ -305,7 +381,8 @@ class MainActivity : ComponentActivity() {
             state.radar.loading = false
             when (out) {
                 is Net.Outcome.Ok -> {
-                    state.radar.items = listOf(out.value.first, out.value.second)
+                    state.radar.items = listOf(out.value.first) + out.value.second
+                    radarFrame = null
                     state.radar.updatedAt = System.currentTimeMillis()
                     state.radar.error = null
                     applyMap()
@@ -325,8 +402,11 @@ class MainActivity : ComponentActivity() {
         val w = WeatherState(sel.key)
         state.weather = w
         run("weather") {
-            when (val out = withContext(Dispatchers.IO) { Feeds.weather(ll[0], ll[1]) }) {
-                is Net.Outcome.Ok -> w.weather = out.value
+            when (val out = withContext(Dispatchers.IO) { Feeds.forecast(ll[0], ll[1]) }) {
+                is Net.Outcome.Ok -> {
+                    w.weather = out.value.first
+                    w.forecast = out.value.second
+                }
                 is Net.Outcome.Failed -> w.error = out.message
             }
         }
@@ -395,12 +475,18 @@ class MainActivity : ComponentActivity() {
     /** Aircraft within 250 nm of wherever the screen centre is now. */
     private fun loadFlights() {
         if (!state.layers.flights) return clear(state.flights, "flights")
-        val c = globe?.center() ?: return
+        // Around the followed aircraft (so it never drops out), otherwise the screen centre.
+        val c = state.following?.let { flightAt(it, System.currentTimeMillis()) } ?: globe?.center() ?: return
         state.flights.loading = true
         state.flights.attemptAt = System.currentTimeMillis()
         run("flights") {
             val out = withContext(Dispatchers.IO) { Feeds.flights(c[0], c[1]) }
-            settle(state.flights, map(out) { it.flights to it.skipped }, "flights") { list -> list.map(::flightMarker) }
+            val at = System.currentTimeMillis()
+            settle(state.flights, map(out) { it.flights to it.skipped }, "flights") { list ->
+                flightsAt = at
+                rememberTrail(list, at)
+                list.map { flightMarker(it, at, at) }
+            }
         }
     }
 
@@ -442,7 +528,9 @@ class MainActivity : ComponentActivity() {
     private fun updateSatellites(now: Long, orbit: Boolean) {
         val stations = state.layers.satGroup.slug == "stations"
         val markers = ArrayList<Marker>(state.sats.items.size)
-        for (s in state.sats.items) {
+        val shown = (if (state.layers.satellites) state.sats.items else emptyList()) +
+            state.extraSats.filter { x -> state.sats.items.none { it.tle.norad == x.tle.norad } }
+        for (s in shown) {
             val p = s.ecefAt(now) ?: continue // decayed
             val ll = Geo.latLon(p)
             val big = stations && (s.tle.norad == ISS || s.tle.norad == CSS)
@@ -481,11 +569,213 @@ class MainActivity : ComponentActivity() {
         return Marker("q:" + q.id, q.lat, q.lon, size, Palette.depth(q.depthKm).toArgb())
     }
 
-    private fun flightMarker(f: Flight): Marker = Marker(
-        "f:" + f.hex, f.lat, f.lon, 20f * density,
-        (if (f.onGround) Palette.dim else Palette.flight).toArgb(),
-        shape = Marker.SHAPE_PLANE, bearing = f.track ?: 0.0,
-    )
+    private fun flightMarker(f: Flight, fetchedAt: Long, now: Long): Marker {
+        val p = glide(f, fetchedAt, now)
+        return Marker(
+            "f:" + f.hex, p[0], p[1], 20f * density,
+            (if (f.onGround) Palette.dim else Palette.flight).toArgb(),
+            shape = Marker.SHAPE_PLANE, bearing = f.track ?: 0.0,
+        )
+    }
+
+    // ---- Flights: gliding, trails, follow ----------------------------------------------
+
+    private var flightsAt = 0L
+    /** Recent positions per aircraft: lat, lon, altitude m, time. */
+    private val trails = HashMap<String, ArrayDeque<DoubleArray>>()
+
+    /** Between the 10 s updates each aircraft moves on along its track at its speed. */
+    private fun glide(f: Flight, fetchedAt: Long, now: Long): DoubleArray {
+        val track = f.track
+        val speed = f.speedKt
+        if (f.onGround || track == null || speed == null) return doubleArrayOf(f.lat, f.lon)
+        val s = ((now - fetchedAt) / 1000.0).coerceIn(0.0, 30.0) // never run away if updates stop
+        return Motion.ahead(f.lat, f.lon, track, speed, s)
+    }
+
+    private fun flightAt(hex: String, now: Long): DoubleArray? =
+        state.flights.items.firstOrNull { it.hex == hex }?.let { glide(it, flightsAt, now) }
+
+    private fun rememberTrail(list: List<Flight>, at: Long) {
+        for (f in list) {
+            val q = trails.getOrPut(f.hex) { ArrayDeque() }
+            q.addLast(doubleArrayOf(f.lat, f.lon, (f.altFt ?: 0) * 0.3048, at.toDouble()))
+        }
+        // 30 minutes of history; aircraft gone for 5 minutes are forgotten.
+        val cut = at - 30 * 60_000.0
+        val iter = trails.entries.iterator()
+        while (iter.hasNext()) {
+            val e = iter.next()
+            while (e.value.isNotEmpty() && e.value.first()[3] < cut) e.value.removeFirst()
+            if (e.value.isEmpty() || e.value.last()[3] < at - 5 * 60_000.0) iter.remove()
+        }
+    }
+
+    /** Once a second: aircraft glide on, trails follow them, the camera follows its plane. */
+    private fun glideFlights(now: Long) {
+        val list = state.flights.items
+        globe?.setLayer("flights", list.map { flightMarker(it, flightsAt, now) })
+        if (state.layers.trails) {
+            val lines = ArrayList<GlobeLine>()
+            for (f in list) {
+                val q = trails[f.hex] ?: continue
+                val pts = q.map { Geo.ecef(it[0], it[1], it[2]) }.toMutableList()
+                val p = glide(f, flightsAt, now)
+                pts.add(Geo.ecef(p[0], p[1], (f.altFt ?: 0) * 0.3048))
+                if (pts.size >= 2) lines.add(GlobeLine(pts, Palette.flight.toArgb(), if (f.hex == state.following) 0.95f else 0.45f))
+            }
+            globe?.setLines("trails", lines)
+        } else {
+            globe?.setLines("trails", emptyList())
+        }
+        state.following?.let { hex ->
+            val p = flightAt(hex, now)
+            if (p == null) state.following = null else globe?.lookAt(p[0], p[1])
+        }
+    }
+
+    // ---- Cameras (OpenStreetMap) ---------------------------------------------------------
+
+    private var camerasCentre: DoubleArray? = null
+
+    /** Moved far enough since the last load that the loaded box no longer covers the view. */
+    private fun camerasStale(): Boolean {
+        val c = globe?.center() ?: return false
+        val last = camerasCentre ?: return true
+        val moved = Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000
+        return moved > last[2] * 0.4 || c[2] < last[2] * 0.5 || c[2] > last[2] * 2
+    }
+
+    private fun loadCameras() {
+        if (!state.layers.cameras) {
+            state.camerasNote = null
+            camerasCentre = null
+            return clear(state.cameras, "cameras")
+        }
+        val c = globe?.center() ?: return
+        state.cameras.attemptAt = System.currentTimeMillis()
+        if (c[2] > CAMERAS_MAX_ALT) {
+            state.camerasNote = "zoom in below ${(CAMERAS_MAX_ALT / 1000).toInt()} km to load them"
+            camerasCentre = null
+            return
+        }
+        state.camerasNote = null
+        val r = c[2] * 1.6 // metres around the centre: a little more than the screen
+        val dLat = r / 111_000.0
+        val dLon = dLat / kotlin.math.cos(Math.toRadians(c[0])).coerceAtLeast(0.1)
+        state.cameras.loading = true
+        run("cameras") {
+            val out = withContext(Dispatchers.IO) { Feeds.cameras(c[0] - dLat, c[1] - dLon, c[0] + dLat, c[1] + dLon) }
+            if (out is Net.Outcome.Ok) camerasCentre = doubleArrayOf(c[0], c[1], r)
+            settle(state.cameras, map(out) { it to 0 }, "cameras") { list ->
+                list.map { cam ->
+                    Marker("c:" + cam.id, cam.lat, cam.lon, 11f * density, (if (cam.alpr) Palette.alpr else Palette.camera).toArgb())
+                }
+            }
+        }
+    }
+
+    // ---- Search ---------------------------------------------------------------------------
+
+    /** Places (OpenStreetMap), flights by callsign (adsb.lol) and satellites by name (CelesTrak). */
+    private fun search(q: String) {
+        val query = q.trim()
+        val se = state.search
+        se.query = q
+        if (query.length < 2) return
+        se.busy = true
+        se.errors = emptyList()
+        se.searched = true
+        // What is already on the globe answers at once.
+        val local = ArrayList<Hit>()
+        state.flights.items.filter { it.callsign?.contains(query, true) == true || it.registration?.contains(query, true) == true }
+            .take(5).forEach { local.add(Hit.OfFlight(it)) }
+        (state.sats.items + state.extraSats).filter { it.tle.name.contains(query, true) }.take(5).forEach { local.add(Hit.OfSat(it)) }
+        se.hits = local
+        run("search") {
+            val errors = ArrayList<String>()
+            val found = ArrayList(local)
+            val looksLikeCallsign = Regex("^[A-Za-z]{2,3}[0-9][A-Za-z0-9]{0,4}$").matches(query)
+            if (looksLikeCallsign && local.none { it is Hit.OfFlight }) {
+                when (val o = withContext(Dispatchers.IO) { Feeds.callsign(query) }) {
+                    is Net.Outcome.Ok -> o.value.flights.forEach { found.add(Hit.OfFlight(it)) }
+                    is Net.Outcome.Failed -> errors.add(o.message)
+                }
+            }
+            if (query.length >= 3) {
+                when (val o = withContext(Dispatchers.IO) { Feeds.satellitesNamed(query) }) {
+                    is Net.Outcome.Ok -> o.value.tles.take(8).forEach { t ->
+                        if (found.none { it is Hit.OfSat && it.s.tle.norad == t.norad }) found.add(Hit.OfSat(Sgp4(t)))
+                    }
+                    // CelesTrak answers "No GP data found" for no match: not worth a red line.
+                    is Net.Outcome.Failed -> if ("no connection" in o.message || "HTTP" in o.message) errors.add(o.message)
+                }
+            }
+            when (val o = withContext(Dispatchers.IO) { Feeds.places(query) }) {
+                is Net.Outcome.Ok -> o.value.forEach { found.add(Hit.OfPlace(it)) }
+                is Net.Outcome.Failed -> errors.add(o.message)
+            }
+            se.hits = found
+            se.errors = errors
+            se.busy = false
+        }
+    }
+
+    /** A search hit was chosen: go there and open its card. */
+    private fun pick(hit: Hit) {
+        state.search.open = false
+        when (hit) {
+            is Hit.OfPlace -> {
+                val sel = Sel.OfPlace(hit.p.lat, hit.p.lon)
+                select(sel)
+                globe?.setLayer("pin", listOf(Marker(sel.key, hit.p.lat, hit.p.lon, 16f * density, Palette.accent.toArgb())))
+                globe?.flyTo(hit.p.lat, hit.p.lon, 30_000.0)
+            }
+            is Hit.OfFlight -> {
+                val f = hit.f
+                if (state.flights.items.none { it.hex == f.hex }) {
+                    state.flights.items = state.flights.items + f
+                    flightsAt = System.currentTimeMillis()
+                }
+                // Follow it: flights then load around it, wherever it is in the world.
+                state.following = f.hex
+                if (!state.layers.flights) change(state.layers.copy(flights = true))
+                globe?.flyTo(f.lat, f.lon, 300_000.0)
+                select(Sel.OfFlight(f))
+                globe?.select("f:" + f.hex, fly = false)
+                state.flights.attemptAt = 0 // reload around it right away
+            }
+            is Hit.OfSat -> {
+                if ((state.sats.items + state.extraSats).none { it.tle.norad == hit.s.tle.norad }) {
+                    state.extraSats = state.extraSats + hit.s
+                }
+                updateSatellites(System.currentTimeMillis(), orbit = false)
+                select(Sel.OfSat(hit.s))
+                globe?.select("s:" + hit.s.tle.norad, fly = true)
+            }
+        }
+    }
+
+    // ---- Map cache ------------------------------------------------------------------------
+
+    private fun measureCache() {
+        run("cache") {
+            state.cacheBytes = withContext(Dispatchers.IO) {
+                File(cacheDir, "tiles").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            }
+        }
+    }
+
+    private fun clearCache() {
+        run("cache") {
+            withContext(Dispatchers.IO) {
+                File(cacheDir, "tiles").deleteRecursively()
+                runCatching { HttpResponseCache.getInstalled()?.delete() }
+            }
+            installHttpCache()
+            state.cacheBytes = 0
+        }
+    }
 
     private fun eventMarker(e: NatEvent): Marker =
         Marker("e:" + e.id, e.lat, e.lon, 13f * density, Palette.event(e.category).toArgb())
@@ -500,7 +790,8 @@ class MainActivity : ComponentActivity() {
         key.startsWith("p:") -> (state.selected as? Sel.OfPlace)?.takeIf { it.key == key }
         key.startsWith("q:") -> state.quakes.items.firstOrNull { "q:" + it.id == key }?.let { Sel.OfQuake(it) }
         key.startsWith("f:") -> state.flights.items.firstOrNull { "f:" + it.hex == key }?.let { Sel.OfFlight(it) }
-        key.startsWith("s:") -> state.sats.items.firstOrNull { "s:" + it.tle.norad == key }?.let { Sel.OfSat(it) }
+        key.startsWith("s:") -> (state.sats.items + state.extraSats).firstOrNull { "s:" + it.tle.norad == key }?.let { Sel.OfSat(it) }
+        key.startsWith("c:") -> state.cameras.items.firstOrNull { "c:" + it.id == key }?.let { Sel.OfCamera(it) }
         key.startsWith("e:") -> state.events.items.firstOrNull { "e:" + it.id == key }?.let { Sel.OfEvent(it) }
         else -> null
     }
@@ -607,6 +898,10 @@ class MainActivity : ComponentActivity() {
         private const val FLIGHTS_MS = 10_000L
         /** RainViewer publishes a frame every 10 minutes. */
         private const val RADAR_MS = 10 * 60_000L
+        /** The last hour, looped. */
+        private const val RADAR_FRAMES = 6
+        /** Overpass boxes stay small: cameras load only below this height. */
+        private const val CAMERAS_MAX_ALT = 60_000.0
         /** Camera height when flying to you: a city and its surroundings. */
         private const val ME_ALT = 25_000.0
         const val ISS = 25544
