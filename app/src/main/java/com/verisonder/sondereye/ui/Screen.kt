@@ -158,10 +158,10 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                         CircularProgressIndicator(Modifier.size(20.dp), color = Palette.accent, strokeWidth = 2.dp)
                     }
                 } else {
-                    RoundButton(Icons.Default.Refresh, "Refresh", actions.refresh)
+                    RoundButton(Icons.Default.Refresh, "Refresh", onClick = actions.refresh)
                 }
-                RoundButton(Icons.Default.LocationOn, "Where I am", actions.myLocation, tint = if (state.me != null) Palette.me else Palette.text)
-                RoundButton(Icons.Default.Home, "Whole Earth", actions.home)
+                RoundButton(Icons.Default.LocationOn, "Where I am", tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+                RoundButton(Icons.Default.Home, "Whole Earth", onClick = actions.home)
             }
         }
 
@@ -294,7 +294,7 @@ private fun ErrorLine(text: String, onClick: (() -> Unit)?) {
 }
 
 @Composable
-private fun RoundButton(icon: ImageVector, label: String, onClick: () -> Unit, tint: Color = Palette.text) {
+private fun RoundButton(icon: ImageVector, label: String, tint: Color = Palette.text, onClick: () -> Unit) {
     Box(
         Modifier
             .size(44.dp)
