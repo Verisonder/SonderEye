@@ -578,7 +578,7 @@ class MainActivity : ComponentActivity() {
     private fun installHttpCache() {
         if (HttpResponseCache.getInstalled() != null) return
         try {
-            HttpResponseCache.install(File(cacheDir, "http"), 150L * 1024 * 1024)
+            HttpResponseCache.install(File(cacheDir, "http"), 20L * 1024 * 1024) // feeds only; tiles have their own cache
         } catch (e: IOException) {
             // Works without a cache, only slower on revisits.
             Log.w("SonderEye", "HTTP cache unavailable", e)

@@ -102,6 +102,8 @@ class TileLoader(
         try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 15_000
+            // Tiles have their own disk cache below; keeping them in the HTTP cache too would store each twice.
+            conn.useCaches = false
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
             val code = conn.responseCode
             if (code == 404 || code == 204) return null
