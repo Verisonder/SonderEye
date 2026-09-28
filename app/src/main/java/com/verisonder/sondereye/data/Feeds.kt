@@ -1,0 +1,50 @@
+package com.verisonder.sondereye.data
+
+import com.verisonder.sondereye.core.Adsb
+import com.verisonder.sondereye.core.Eonet
+import com.verisonder.sondereye.core.MinMag
+import com.verisonder.sondereye.core.Period
+import com.verisonder.sondereye.core.Sky
+import com.verisonder.sondereye.core.Tle
+import com.verisonder.sondereye.core.Usgs
+import java.io.File
+
+/** Every public feed the app reads. Blocking: call from Dispatchers.IO. */
+object Feeds {
+    fun quakes(min: MinMag, period: Period) =
+        Net.get(Usgs.feedUrl(min, period), "Earthquakes", "USGS", Usgs::parse)
+
+    fun flights(lat: Double, lon: Double) =
+        Net.get(Adsb.url(lat, lon, Adsb.MAX_NM), "Flights", "adsb.lol", Adsb::parse)
+
+    fun events() = Net.get(Eonet.URL, "Natural events", "NASA EONET", Eonet::parse)
+
+    /**
+     * Orbital elements, cached on disk for 2 hours as CelesTrak asks. When a download
+     * fails, a stale copy is used and the failure is still reported.
+     */
+    fun satellites(cacheDir: File, group: String): Pair<Tle.Companion.Result?, String?> {
+        val f = File(cacheDir, "tle-$group.txt")
+        val age = System.currentTimeMillis() - f.lastModified()
+        if (f.exists() && age < 2 * 3_600_000L) {
+            runCatching { return Tle.parseAll(f.readText()) to null }
+        }
+        return when (val out = Net.get(Sky.celestrakUrl(group), "Satellites", "CelesTrak") { it }) {
+            is Net.Outcome.Ok -> {
+                val parsed = Tle.parseAll(out.value)
+                if (parsed.tles.isEmpty()) {
+                    // CelesTrak answers plain text errors with HTTP 200.
+                    val stale = if (f.exists()) runCatching { Tle.parseAll(f.readText()) }.getOrNull() else null
+                    stale to "Satellites: CelesTrak sent no orbits (${out.value.take(80).trim()})"
+                } else {
+                    runCatching { f.writeText(out.value) }
+                    parsed to null
+                }
+            }
+            is Net.Outcome.Failed -> {
+                val stale = if (f.exists()) runCatching { Tle.parseAll(f.readText()) }.getOrNull() else null
+                stale to (out.message + if (stale != null) ", showing the last copy" else "")
+            }
+        }
+    }
+}

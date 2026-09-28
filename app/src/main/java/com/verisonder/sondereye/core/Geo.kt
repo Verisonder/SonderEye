@@ -390,11 +390,15 @@ object TileMesh {
 
 object Pick {
     /** Nearest visible point within [reachPx] of the tap, as an index into [latLon] pairs. */
-    fun nearest(view: View, lat: DoubleArray, lon: DoubleArray, px: Double, py: Double, reachPx: Double): Int {
+    fun nearest(
+        view: View, lat: DoubleArray, lon: DoubleArray, px: Double, py: Double, reachPx: Double,
+        alt: DoubleArray? = null,
+    ): Int {
         var best = -1
         var bestD = reachPx * reachPx
-        for (i in lat.indices) {
-            val p = Geo.ecef(lat[i], lon[i])
+        // From the end: later markers are drawn on top, so they win ties.
+        for (i in lat.indices.reversed()) {
+            val p = Geo.ecef(lat[i], lon[i], alt?.getOrNull(i) ?: 0.0)
             if (!view.aboveHorizon(p)) continue
             val s = view.project(p) ?: continue
             val dx = s[0] - px

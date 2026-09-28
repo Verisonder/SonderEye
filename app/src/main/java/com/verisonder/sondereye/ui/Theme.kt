@@ -20,6 +20,20 @@ object Palette {
     val mid = Color(0xFFFF5E57)
     val deep = Color(0xFFB06CFF)
 
+    val flight = Color(0xFFF2F5F8)
+    val satellite = Color(0xFF7CF0C8)
+    val me = Color(0xFF3D8BFF)
+
+    /** NASA EONET categories. */
+    fun event(category: String): Color = when (category) {
+        "wildfires" -> Color(0xFFFF6A3D)
+        "volcanoes" -> Color(0xFFE0301E)
+        "severeStorms" -> Color(0xFF8C9BFF)
+        "seaLakeIce" -> Color(0xFF9FE3FF)
+        "floods" -> Color(0xFF3FA7FF)
+        else -> Color(0xFFFFD166)
+    }
+
     fun depth(km: Double): Color = when {
         km < 70 -> shallow
         km < 300 -> mid

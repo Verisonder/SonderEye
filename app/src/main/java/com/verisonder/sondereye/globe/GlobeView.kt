@@ -25,8 +25,8 @@ import kotlin.math.sin
 class GlobeView(context: Context, private val listener: Listener) : GLSurfaceView(context) {
 
     interface Listener {
-        /** A marker was tapped (its index), or empty globe (-1). */
-        fun onTap(index: Int)
+        /** A marker was tapped (its key), or empty globe (null). */
+        fun onTap(key: String?)
         fun onStatus(status: GlobeStatus)
         fun onError(message: String)
     }
@@ -34,6 +34,8 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     @Volatile private var cam = CameraState.HOME
     private val density = resources.displayMetrics.density
     private val renderer: GlobeRenderer
+    private val layers = LinkedHashMap<String, List<Marker>>()
+    private var all: List<Marker> = emptyList()
     private var markerLat = DoubleArray(0)
     private var markerLon = DoubleArray(0)
 
@@ -57,22 +59,41 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     // ---- API ----------------------------------------------------------------------
 
-    fun setMarkers(list: List<Marker>) {
-        renderer.markers = list
-        markerLat = DoubleArray(list.size) { list[it].lat }
-        markerLon = DoubleArray(list.size) { list[it].lon }
-        if (renderer.selected >= list.size) renderer.selected = -1
+    /**
+     * Replaces one layer's markers. Layers draw in the order they were first set, so the
+     * later ones (you, satellites) sit on top.
+     */
+    fun setLayer(name: String, list: List<Marker>) {
+        layers[name] = list
+        all = layers.values.flatten()
+        renderer.markers = all
+        // Picking uses the altitude too: a satellite is picked where it is drawn.
+        markerLat = DoubleArray(all.size) { all[it].lat }
+        markerLon = DoubleArray(all.size) { all[it].lon }
+        markerAlt = DoubleArray(all.size) { all[it].altM }
         requestRender()
     }
 
-    /** Rings marker [index] (or none with -1); flies to it when [fly]. */
-    fun select(index: Int, fly: Boolean) {
-        renderer.selected = index
-        if (fly && index in markerLat.indices) {
-            flyTo(cam.copy(lat = markerLat[index], lon = markerLon[index], alt = cam.alt.coerceIn(600_000.0, 4_000_000.0)))
-        }
+    private var markerAlt = DoubleArray(0)
+
+    /** Rings the marker with [key] (or none); flies to it when [fly]. */
+    fun select(key: String?, fly: Boolean) {
+        renderer.selectedKey = key
+        val m = if (key == null) null else all.firstOrNull { it.key == key }
+        if (fly && m != null) flyTo(m.lat, m.lon, cam.alt.coerceIn(600_000.0, 4_000_000.0))
         requestRender()
     }
+
+    fun flyTo(lat: Double, lon: Double, alt: Double) = flyTo(cam.copy(lat = lat, lon = lon, alt = alt))
+
+    /** A line in space, world metres (a satellite's orbit); null clears it. */
+    fun setPath(points: List<com.verisonder.sondereye.core.V3>?) {
+        renderer.path = points
+        requestRender()
+    }
+
+    /** [lat, lon, alt] of the point under the screen centre and the camera height. */
+    fun center(): DoubleArray = cam.let { doubleArrayOf(it.lat, it.lon, it.alt) }
 
     fun home() = flyTo(CameraState.HOME)
 
@@ -191,11 +212,11 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         override fun onDown(e: MotionEvent) = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            val i = Pick.nearest(view(), markerLat, markerLon, e.x.toDouble(), e.y.toDouble(), 30.0 * density)
-            renderer.selected = i
-            requestRender()
-            listener.onTap(i)
-            if (i >= 0) select(i, fly = true)
+            // Later layers are on top, so on a tie they win: search from the end.
+            val i = Pick.nearest(view(), markerLat, markerLon, e.x.toDouble(), e.y.toDouble(), 30.0 * density, markerAlt)
+            val key = all.getOrNull(i)?.key
+            listener.onTap(key)
+            select(key, fly = key != null)
             return true
         }
 

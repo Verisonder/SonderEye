@@ -6,9 +6,13 @@ app/src/main/java/com/verisonder/sondereye/
     Geo.kt      Globe maths: camera, projection, picking, tile selection, tile meshes, fly-to.
     Json.kt     JSON reader.
     Quakes.kt   Quake model, USGS feed URLs and parsing, formatting.
+    Live.kt     Flights (adsb.lol) and natural events (NASA EONET): models and parsers.
+    Sgp4.kt     TLE parsing, SGP4 near-Earth propagation, sidereal time, look angles, passes.
   data/
-    UsgsClient.kt  Downloads a feed; every failure becomes a sentence for the screen.
-    Settings.kt    Layer settings in SharedPreferences.
+    Net.kt       One GET; every failure becomes a sentence for the screen.
+    Feeds.kt     Every public feed, and the 2-hour TLE disk cache.
+    Settings.kt  Layer settings in SharedPreferences.
+    Where.kt     Position from the platform LocationManager (no Play services).
   globe/   The native globe.
     GlobeView.kt      GLSurfaceView. Owns the camera and every gesture.
     GlobeRenderer.kt  OpenGL ES 3.0: imagery tiles, polar caps, atmosphere, markers.
@@ -36,7 +40,18 @@ app/src/main/java/com/verisonder/sondereye/
   an animation, or a tile arriving. An idle globe costs nothing.
 - **Gestures** keep the ground under the finger under the finger: drag, pinch around
   the focus point, two-finger twist, fling with decay, double-tap zoom.
-- **Picking** chooses the nearest visible marker within 30 dp of a tap.
+- **Picking** chooses the nearest visible marker within 30 dp of a tap; later layers win ties.
+- **Markers** are GPU point sprites with shapes: dot (quakes, events), arrow turned to
+  the aircraft's track (flights), diamond at orbital altitude (satellites), blue dot (you).
+- **Layers** draw in a fixed order: quakes, events, flights, satellites, you.
+
+## Satellites
+
+SGP4 (near-Earth) is a port of Vallado's reference code with WGS-72 constants. Checked
+against the python-sgp4 library: 25 cases, agreement within a millimetre. Orbits of 225
+minutes or more need SDP4 and are counted but not drawn. Positions are converted from
+TEME to Earth-fixed with IAU-82 sidereal time. Passes are found on a 30 s scan over 48 h
+and refined to a second.
 
 ## Adding a layer
 

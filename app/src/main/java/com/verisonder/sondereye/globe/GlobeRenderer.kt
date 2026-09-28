@@ -19,8 +19,26 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 /** One marker, prepared on the UI thread. */
-class Marker(val lat: Double, val lon: Double, val sizePx: Float, val rgb: Int) {
-    val pos: V3 = Geo.ecef(lat, lon)
+class Marker(
+    /** Stable across refreshes ("q:us7000abcd", "f:3c6dd4"…); selection follows it. */
+    val key: String,
+    val lat: Double,
+    val lon: Double,
+    val sizePx: Float,
+    val rgb: Int,
+    val shape: Int = SHAPE_DOT,
+    /** Degrees clockwise from north for shapes that point somewhere; NaN for none. */
+    val bearing: Double = Double.NaN,
+    val altM: Double = 0.0,
+) {
+    val pos: V3 = Geo.ecef(lat, lon, altM)
+
+    companion object {
+        const val SHAPE_DOT = 0
+        const val SHAPE_PLANE = 1
+        const val SHAPE_SAT = 2
+        const val SHAPE_ME = 3
+    }
 }
 
 data class GlobeStatus(
@@ -44,8 +62,9 @@ class GlobeRenderer(
 ) : GLSurfaceView.Renderer {
 
     @Volatile var markers: List<Marker> = emptyList()
-    /** Index into [markers], or -1. */
-    @Volatile var selected: Int = -1
+    @Volatile var selectedKey: String? = null
+    /** A line through space (a satellite's orbit), in world metres; null for none. */
+    @Volatile var path: List<V3>? = null
 
     private val uploads = ConcurrentLinkedQueue<Pair<TileKey, Bitmap>>()
     @Volatile private var failures = 0
@@ -89,6 +108,7 @@ class GlobeRenderer(
         textures.clear()
         meshes.clear()
         indexBuffers.clear()
+        pathVbo = 0
         broken = false
         try {
             tileProg = program(TILE_VS, TILE_FS, "imagery")
@@ -171,6 +191,7 @@ class GlobeRenderer(
         }
 
         drawCaps(view, uMvp, uHasTex, uColor)
+        drawPath(view, uMvp, uHasTex, uColor)
         drawMarkers(view)
         trim(textures, TEXTURE_CAP) { GLES30.glDeleteTextures(1, intArrayOf(it), 0) }
         trim(meshes, MESH_CAP) { GLES30.glDeleteBuffers(1, intArrayOf(it), 0) }
@@ -321,14 +342,16 @@ class GlobeRenderer(
 
     private fun drawMarkers(view: com.verisonder.sondereye.core.View) {
         val list = markers
-        val sel = selected
-        val count = list.size + if (sel in list.indices) 1 else 0
+        val selKey = selectedKey
+        val sel = if (selKey == null) null else list.firstOrNull { it.key == selKey }
+        val count = list.size + if (sel != null) 1 else 0
         if (count == 0) return
-        val stride = 8 // x y z size r g b ring
+        val stride = 10 // x y z size r g b ring shape angle
         if (pointScratch.size < count * stride) pointScratch = FloatArray(count * stride)
         val a = pointScratch
         var o = 0
         val eye = view.eye
+        val heading = view.cam.heading
         fun put(m: Marker, ring: Boolean) {
             // Relative to the eye in double, then float: no jitter when close.
             a[o++] = (m.pos.x - eye.x).toFloat(); a[o++] = (m.pos.y - eye.y).toFloat(); a[o++] = (m.pos.z - eye.z).toFloat()
@@ -337,9 +360,12 @@ class GlobeRenderer(
             a[o++] = ((m.rgb shr 8) and 0xFF) / 255f
             a[o++] = (m.rgb and 0xFF) / 255f
             a[o++] = if (ring) 1f else 0f
+            a[o++] = m.shape.toFloat()
+            // On screen, a bearing turns with the map.
+            a[o++] = if (m.bearing.isNaN()) 0f else Geo.toRad(m.bearing - heading).toFloat()
         }
         for (m in list) put(m, false)
-        if (sel in list.indices) put(list[sel], true)
+        if (sel != null) put(sel, true)
 
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
@@ -350,18 +376,52 @@ class GlobeRenderer(
         GLES30.glUniform1f(GLES30.glGetUniformLocation(pointProg, "uOutline"), 1.2f * density)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pointVbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, count * stride * 4, floats(a, count * stride), GLES30.GL_STREAM_DRAW)
-        GLES30.glEnableVertexAttribArray(0)
-        GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride * 4, 0)
-        GLES30.glEnableVertexAttribArray(1)
-        GLES30.glVertexAttribPointer(1, 1, GLES30.GL_FLOAT, false, stride * 4, 12)
-        GLES30.glEnableVertexAttribArray(2)
-        GLES30.glVertexAttribPointer(2, 3, GLES30.GL_FLOAT, false, stride * 4, 16)
-        GLES30.glEnableVertexAttribArray(3)
-        GLES30.glVertexAttribPointer(3, 1, GLES30.GL_FLOAT, false, stride * 4, 28)
+        val b = stride * 4
+        GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, b, 0)
+        GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 1, GLES30.GL_FLOAT, false, b, 12)
+        GLES30.glEnableVertexAttribArray(2); GLES30.glVertexAttribPointer(2, 3, GLES30.GL_FLOAT, false, b, 16)
+        GLES30.glEnableVertexAttribArray(3); GLES30.glVertexAttribPointer(3, 1, GLES30.GL_FLOAT, false, b, 28)
+        GLES30.glEnableVertexAttribArray(4); GLES30.glVertexAttribPointer(4, 1, GLES30.GL_FLOAT, false, b, 32)
+        GLES30.glEnableVertexAttribArray(5); GLES30.glVertexAttribPointer(5, 1, GLES30.GL_FLOAT, false, b, 36)
         GLES30.glDrawArrays(GLES30.GL_POINTS, 0, count)
-        GLES30.glDisableVertexAttribArray(2)
-        GLES30.glDisableVertexAttribArray(3)
+        for (i in 2..5) GLES30.glDisableVertexAttribArray(i)
         GLES30.glDepthMask(true)
+    }
+
+    // ---- Orbit line -----------------------------------------------------------------
+
+    private var pathVbo = 0
+
+    private fun drawPath(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int) {
+        val pts = path ?: return
+        if (pts.size < 2) return
+        if (pathVbo == 0) {
+            val ids = IntArray(1); GLES30.glGenBuffers(1, ids, 0); pathVbo = ids[0]
+        }
+        val eye = view.eye
+        val data = FloatArray(pts.size * 5)
+        var o = 0
+        for (p in pts) {
+            data[o++] = (p.x - eye.x).toFloat(); data[o++] = (p.y - eye.y).toFloat(); data[o++] = (p.z - eye.z).toFloat()
+            data[o++] = 0f; data[o++] = 0f
+        }
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pathVbo)
+        GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.size * 4, floats(data, data.size), GLES30.GL_STREAM_DRAW)
+        GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 20, 0)
+        GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 20, 12)
+        M4.toFloat(view.projRot, mvp)
+        GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
+        GLES30.glUniform1f(uHasTex, 0f)
+        GLES30.glUniform3f(uColor, 0.31f, 0.76f, 0.97f)
+        GLES30.glLineWidth(lineWidth)
+        GLES30.glDrawArrays(GLES30.GL_LINE_STRIP, 0, pts.size)
+    }
+
+    /** 2 dp, within what this GPU can draw (many only do 1 px). */
+    private val lineWidth: Float by lazy {
+        val range = FloatArray(2)
+        GLES30.glGetFloatv(GLES30.GL_ALIASED_LINE_WIDTH_RANGE, range, 0)
+        (2f * density).coerceIn(1f, maxOf(1f, range[1]))
     }
 
     // ---- Helpers --------------------------------------------------------------------
@@ -453,9 +513,13 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in float aSize;
 layout(location = 2) in vec3 aColor;
 layout(location = 3) in float aRing;
+layout(location = 4) in float aShape;
+layout(location = 5) in float aAngle;
 out vec3 vColor;
 out float vRing;
 out float vSize;
+flat out int vShape;
+out vec2 vRot; // cos, sin of the on-screen bearing
 void main() {
     // Pulled 0.2% toward the eye so a marker sits on top of the surface it marks,
     // while the far side of the planet still hides it.
@@ -464,6 +528,8 @@ void main() {
     vColor = aColor;
     vRing = aRing;
     vSize = aSize;
+    vShape = int(aShape + 0.5);
+    vRot = vec2(cos(aAngle), sin(aAngle));
 }"""
 
         private const val POINT_FS = """#version 300 es
@@ -472,19 +538,60 @@ uniform float uOutline;
 in vec3 vColor;
 in float vRing;
 in float vSize;
+flat in int vShape;
+in vec2 vRot;
 out vec4 outColor;
+
+const vec3 DARK = vec3(0.01, 0.02, 0.04);
+
+// Aircraft: an arrow pointing up (+y) in its own frame, with a notch at the tail.
+bool plane(vec2 p) {
+    if (p.y < -0.6 || p.y > 0.9) return false;
+    if (abs(p.x) > 0.55 * (0.9 - p.y) / 1.5) return false;
+    return !(p.y < -0.2 - 0.727 * abs(p.x));
+}
+
 void main() {
-    float r = length(gl_PointCoord * 2.0 - 1.0) * vSize * 0.5; // distance from centre, px
+    vec2 c = vec2(gl_PointCoord.x * 2.0 - 1.0, 1.0 - gl_PointCoord.y * 2.0); // y up
+    float r = length(c) * vSize * 0.5; // distance from centre, px
     float edge = vSize * 0.5;
+
+    if (vRing > 0.5) {
+        float aa = 1.0 - smoothstep(edge - 1.0, edge, r);
+        float ring = smoothstep(edge - 4.0, edge - 3.0, r);
+        if (aa * ring <= 0.0) discard;
+        outColor = vec4(1.0, 1.0, 1.0, ring * aa);
+        return;
+    }
+
+    if (vShape == 1) {
+        // Into the arrow's frame: undo the clockwise screen bearing.
+        vec2 p = vec2(vRot.x * c.x - vRot.y * c.y, vRot.y * c.x + vRot.x * c.y);
+        if (plane(p)) { outColor = vec4(vColor, 1.0); return; }
+        if (plane(p * 0.84)) { outColor = vec4(DARK, 0.9); return; }
+        discard;
+    }
+
+    if (vShape == 2) {
+        float d = abs(c.x) + abs(c.y);
+        if (d > 1.0) discard;
+        outColor = d > 0.72 ? vec4(DARK, 0.9) : vec4(vColor, 1.0);
+        return;
+    }
+
+    if (vShape == 3) {
+        float d = length(c);
+        if (d > 1.0) discard;
+        if (d < 0.42) outColor = vec4(vColor, 1.0);
+        else if (d < 0.58) outColor = vec4(1.0);
+        else outColor = vec4(vColor, 0.22 * (1.0 - smoothstep(0.9, 1.0, d)));
+        return;
+    }
+
     float aa = 1.0 - smoothstep(edge - 1.0, edge, r);
     if (aa <= 0.0) discard;
-    if (vRing > 0.5) {
-        float ring = smoothstep(edge - 4.0, edge - 3.0, r);
-        outColor = vec4(1.0, 1.0, 1.0, ring * aa);
-    } else {
-        vec3 c = r > edge - uOutline ? vec3(0.01, 0.02, 0.04) : vColor;
-        outColor = vec4(c, aa);
-    }
+    vec3 col = r > edge - uOutline ? DARK : vColor;
+    outColor = vec4(col, aa);
 }"""
 
         private const val GLOW_VS = """#version 300 es
