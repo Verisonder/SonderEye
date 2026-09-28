@@ -98,23 +98,6 @@ class CoreTest {
         )
     }
 
-    @Test fun globePayloadIsValidJsonWithExpectedRows() {
-        val quakes = Usgs.parse(feed).quakes
-        val payload = Globe.quakePayload(quakes)
-        val rows = Json.parse(payload) as List<*>
-        assertEquals(3, rows.size)
-        assertEquals(listOf("jp1", 38.2, 142.5, 0.0, 33.5), rows[0]) // null magnitude sent as 0
-        assertEquals(listOf("us7000abcd", 34.8, -4.1, 4.7, 10.0), rows[1])
-        assertEquals("[]", Globe.quakePayload(emptyList()))
-    }
-
-    @Test fun payloadSurvivesHostileIds() {
-        val q = Quake("x\"</script><b>", 1.0, "p", "earthquake", 0, 1.0, 2.0, 3.0, "", false)
-        val payload = Globe.quakePayload(listOf(q))
-        assertFalse(payload.contains("</script>"))
-        assertEquals("x\"</script><b>", ((Json.parse(payload) as List<*>)[0] as List<*>)[0])
-    }
-
     @Test fun formatting() {
         assertEquals("M 4.7", Fmt.mag(4.66))
         assertEquals("M 5.0", Fmt.mag(5.0))

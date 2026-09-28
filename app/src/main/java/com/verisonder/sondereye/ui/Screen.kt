@@ -1,7 +1,9 @@
 package com.verisonder.sondereye.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.view.ViewGroup
-import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -48,7 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -68,6 +69,7 @@ import com.verisonder.sondereye.core.MinMag
 import com.verisonder.sondereye.core.Period
 import com.verisonder.sondereye.core.Quake
 import com.verisonder.sondereye.data.QuakeSettings
+import com.verisonder.sondereye.globe.GlobeView
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -77,7 +79,6 @@ class Actions(
     val change: (QuakeSettings) -> Unit,
     val select: (Quake?) -> Unit,
     val home: () -> Unit,
-    val restartGlobe: () -> Unit,
 )
 
 private class LastQuake { var quake: Quake? = null }
@@ -85,7 +86,7 @@ private class LastQuake { var quake: Quake? = null }
 private val PanelShape = RoundedCornerShape(16.dp)
 
 @Composable
-fun EyeScreen(state: EyeState, globeView: () -> WebView, actions: Actions) {
+fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
     // Relative times ("12 min ago") stay current without a refresh.
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
@@ -99,14 +100,23 @@ fun EyeScreen(state: EyeState, globeView: () -> WebView, actions: Actions) {
     }
 
     Box(Modifier.fillMaxSize().background(Palette.space)) {
-        key(state.globeGeneration) {
+        if (globeView != null) {
             AndroidView(
-                factory = {
-                    globeView().also { v -> (v.parent as? ViewGroup)?.removeView(v) }
-                },
+                factory = { globeView.also { v -> (v.parent as? ViewGroup)?.removeView(v) } },
                 modifier = Modifier.fillMaxSize(),
             )
         }
+
+        // Required by the imagery provider. Sits under the quake card when one is open.
+        Text(
+            "Imagery: Esri, Maxar, Earthstar Geographics",
+            color = Palette.dim.copy(alpha = 0.8f),
+            fontSize = 10.sp,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .padding(start = 12.dp, bottom = 4.dp),
+        )
 
         Row(
             Modifier
@@ -185,8 +195,9 @@ private fun StatusCard(state: EyeState, now: Long, actions: Actions, modifier: M
             Text(detail, color = Palette.dim, fontSize = 13.sp)
         }
 
-        if (!state.globeReady && state.globeError == null) {
-            Text("Loading globe…", color = Palette.dim, fontSize = 13.sp)
+        val g = state.globeStatus
+        if (g != null && g.failures == 0 && g.loading > 0) {
+            Text("Loading imagery, ${g.loading} tiles…", color = Palette.dim, fontSize = 13.sp)
         }
 
         state.quakeError?.let {
@@ -196,13 +207,15 @@ private fun StatusCard(state: EyeState, now: Long, actions: Actions, modifier: M
                 modifier = Modifier.padding(top = 4.dp).clickable(onClick = actions.refresh),
             )
         }
-        state.globeError?.let {
-            val text = if (it.contains("Tap here")) it else "$it. Tap to reload the globe."
+        if (g != null && g.failures > 0) {
             Text(
-                text,
+                "Imagery: ${g.failures} tiles failed (${g.lastFailure}). Retrying every 20 s.",
                 color = Palette.error, fontSize = 13.sp,
-                modifier = Modifier.padding(top = 4.dp).clickable(onClick = actions.restartGlobe),
+                modifier = Modifier.padding(top = 4.dp),
             )
+        }
+        state.globeError?.let {
+            Text(it, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
     }
 }
@@ -253,7 +266,7 @@ private fun QuakeCard(q: Quake, now: Long, onClose: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(fullTime(q.timeMs), color = Palette.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 if (q.url.isNotEmpty()) {
-                    TextButton(onClick = { GlobeController.openUrl(context, q.url) }) {
+                    TextButton(onClick = { openUrl(context, q.url) }) {
                         Text("Open on USGS", color = Palette.accent)
                     }
                 }
@@ -340,3 +353,7 @@ private fun clock(ms: Long): String = DateFormat.getTimeInstance(DateFormat.SHOR
 
 private fun fullTime(ms: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(ms))
+
+private fun openUrl(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+}

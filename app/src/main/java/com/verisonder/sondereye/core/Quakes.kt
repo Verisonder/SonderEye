@@ -84,27 +84,6 @@ object Usgs {
     }
 }
 
-object Globe {
-    /**
-     * Compact array for the globe page: [[id, lat, lon, mag, depthKm], …]. Only what the
-     * markers need; details stay on the Kotlin side and are shown by the app.
-     */
-    fun quakePayload(list: List<Quake>): String {
-        val b = StringBuilder(list.size * 48).append('[')
-        list.forEachIndexed { i, q ->
-            if (i > 0) b.append(',')
-            b.append('[').append(Json.str(q.id)).append(',')
-                .append(num(q.lat)).append(',')
-                .append(num(q.lon)).append(',')
-                .append(num(q.mag ?: 0.0)).append(',')
-                .append(num(q.depthKm)).append(']')
-        }
-        return b.append(']').toString()
-    }
-
-    private fun num(d: Double): String = if (d.isFinite()) d.toString() else "0"
-}
-
 object Fmt {
     fun mag(m: Double?): String = if (m == null) "M ?" else "M " + ((m * 10).roundToInt() / 10.0)
 

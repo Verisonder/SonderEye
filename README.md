@@ -6,10 +6,11 @@ Live public data on a 3D globe, on your phone. Free and open source, no account,
 
 Phase 1, test builds only.
 
-- 3D globe (CesiumJS in a WebView, satellite imagery).
+- Native 3D globe drawn with OpenGL ES 3.0: satellite imagery that sharpens as you zoom, atmosphere glow.
+- Drag, pinch toward a point, twist to rotate, fling, double-tap to zoom.
 - Earthquakes from USGS: minimum magnitude, period, optional refresh every 5 minutes.
 - Tap a quake for magnitude, place, time, depth and the USGS event page.
-- Every failure (download, feed, globe engine, WebView crash) is shown on screen with a retry.
+- Every failure (feed download, imagery tiles, graphics) is shown on screen.
 
 ## Roadmap
 
@@ -25,7 +26,6 @@ Phase 1, test builds only.
 |---|---|---|
 | Earthquakes | [USGS summary feeds](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php) | None |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
-| Globe engine | [CesiumJS](https://cesium.com/platform/cesiumjs/) 1.145.0, loaded from jsDelivr | None |
 
 The app asks for one permission: internet.
 

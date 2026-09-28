@@ -4,8 +4,8 @@
     <!-- Public feeds only. No location, no accounts, nothing in the background. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- The globe is WebGL. -->
-    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+    <!-- The globe is drawn with OpenGL ES 3.0. -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
 
     <application
         android:allowBackup="false"
@@ -16,7 +16,7 @@
         android:hardwareAccelerated="true"
         android:theme="@style/Theme.SonderEye">
 
-        <!-- Handles its own configuration changes: recreating the activity would reload the
+        <!-- Handles its own configuration changes: recreating the activity would rebuild the
              globe and throw away its camera, tiles and markers on every rotation. -->
         <activity
             android:name=".ui.MainActivity"

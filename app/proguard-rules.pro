@@ -3,7 +3,3 @@
 -dontobfuscate
 -keepattributes SourceFile,LineNumberTable
 
-# The globe page calls these by name through the JavaScript bridge.
--keepclassmembers class com.verisonder.sondereye.ui.GlobeBridge {
-    @android.webkit.JavascriptInterface <methods>;
-}

@@ -7,7 +7,6 @@ activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 junit = "4.13.2"
 coroutines = "1.8.1"
-webkit = "1.12.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -23,8 +22,6 @@ androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "u
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 # Core only. Anything from material-icons-extended will not compile.
 androidx-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-core" }
-
-androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 

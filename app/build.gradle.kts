@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.verisonder.sondereye"
-        // Same floor as SonderFlow. WebGL in the system WebView is reliable from here on.
+        // Same floor as SonderFlow. The globe needs OpenGL ES 3.0, which every phone at this level has.
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -80,7 +80,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.webkit)
     implementation(libs.kotlinx.coroutines.android)
 
     implementation(platform(libs.androidx.compose.bom))

@@ -1,57 +1,46 @@
 # Architecture
 
 ```
-app/src/main/
-  java/com/verisonder/sondereye/
-    core/    Pure Kotlin, no Android. Unit-tested off-device.
-      Json.kt       Reader and JavaScript-safe string escaping.
-      Quakes.kt     Quake model, USGS feed URLs and parsing, globe payload, formatting.
-    data/
-      UsgsClient.kt Downloads a feed; every failure becomes a sentence for the screen.
-      Settings.kt   Layer settings in SharedPreferences.
-    ui/
-      Globe.kt        GlobeController: owns the WebView, the JS bridge and crash recovery.
-      MainActivity.kt State, refresh and auto-refresh (only while on screen).
-      Screen.kt       Compose overlays: status readout, buttons, quake card, layers panel.
-      Theme.kt        Palette, shared with the marker colours in the page.
-  assets/globe/index.html   The globe: Cesium viewer, markers, touch picking, window.SE API.
+app/src/main/java/com/verisonder/sondereye/
+  core/    Pure Kotlin, no Android. Unit-tested off-device.
+    Geo.kt      Globe maths: camera, projection, picking, tile selection, tile meshes, fly-to.
+    Json.kt     JSON reader.
+    Quakes.kt   Quake model, USGS feed URLs and parsing, formatting.
+  data/
+    UsgsClient.kt  Downloads a feed; every failure becomes a sentence for the screen.
+    Settings.kt    Layer settings in SharedPreferences.
+  globe/   The native globe.
+    GlobeView.kt      GLSurfaceView. Owns the camera and every gesture.
+    GlobeRenderer.kt  OpenGL ES 3.0: imagery tiles, polar caps, atmosphere, markers.
+    TileLoader.kt     Imagery downloads, newest first, stale requests dropped.
+  ui/
+    MainActivity.kt  State, refresh, auto-refresh (only while on screen).
+    Screen.kt        Compose overlays: status readout, buttons, quake card, layers panel.
+    Theme.kt         Palette; the marker colours come from here.
 ```
 
-## The bridge
+## Globe
 
-The page is served from `https://appassets.androidplatform.net/assets/globe/index.html`
-through `WebViewAssetLoader`, so it is a normal https origin and can load Cesium from the CDN.
-
-App to page (`evaluateJavascript`):
-
-| Call | Effect |
-|---|---|
-| `SE.setQuakes([[id, lat, lon, mag, depthKm], …])` | Replaces all quake markers |
-| `SE.select(id or null)` | Rings a quake and flies to it, or clears the ring |
-| `SE.home()` | Whole-Earth view |
-
-Page to app (`SonderEyeApp`, a `@JavascriptInterface`):
-
-| Call | Meaning |
-|---|---|
-| `ready()` | Viewer is up. The controller replays the last data and selection. |
-| `select(id)` | A tap picked a quake; empty string means nothing picked. |
-| `error(message)` | Shown on screen as-is. |
-
-Data sent before `ready()` is kept and delivered on ready, so load order never matters.
-After a renderer crash the controller builds a new WebView and replays the same way.
-
-## Choices
-
-- Markers are a `PointPrimitiveCollection`: thousands of points without entities overhead.
-- A tap picks the nearest visible quake within 30 px, since a fingertip is wider than a marker.
-- `requestRenderMode`: the globe draws only when something changes.
-- Colour is depth (0–70, 70–300, 300+ km); size is magnitude.
-- The activity handles rotation itself so the globe is never reloaded.
+- Spherical Earth, metres, x toward 0°/0°, z north.
+- The camera looks straight down at a lat/lon from an altitude, with a heading.
+  Camera state is immutable and handed from the UI thread to the GL thread.
+- **No float jitter.** Every object is positioned relative to the eye in double
+  precision before becoming floats: tiles by their centre (vertices stored relative to
+  it), markers per frame. The GPU never sees a coordinate near 6,400 km.
+- **Imagery** is Esri World Imagery, Web Mercator, 256 px tiles, zoom 2 to 18.
+  Tiles split until they show at no more than 384 px, capped at 180 on screen.
+  A missing tile shows its nearest loaded ancestor, stretched, until it arrives.
+  Skirts under each tile hide cracks between detail levels. Polar caps close the
+  globe above 85.05°, where Web Mercator ends.
+- **Rendering on demand.** Frames are drawn only when something changes: a gesture,
+  an animation, or a tile arriving. An idle globe costs nothing.
+- **Gestures** keep the ground under the finger under the finger: drag, pinch around
+  the focus point, two-finger twist, fling with decay, double-tap zoom.
+- **Picking** chooses the nearest visible marker within 30 dp of a tap.
 
 ## Adding a layer
 
 1. Model and parser in `core/`, with tests.
 2. Client in `data/` returning an outcome with an on-screen message.
-3. Payload function in `core/`, `SE.set<Layer>` in the page.
+3. Markers (or a new draw pass in `GlobeRenderer`).
 4. Settings, status line and panel section in `ui/`.
