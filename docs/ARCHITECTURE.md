@@ -8,6 +8,10 @@ app/src/main/java/com/verisonder/sondereye/
     Quakes.kt   Quake model, USGS feed URLs and parsing, formatting.
     Live.kt     Flights (adsb.lol) and natural events (NASA EONET): models and parsers.
     Sgp4.kt     TLE parsing, SGP4 near-Earth propagation, sidereal time, look angles, passes.
+    Tiles.kt    Map tile sources (base and overlays), radar index, Open-Meteo weather.
+    Astro.kt    Sun and Moon positions, Earth's shadow, sky-view projection.
+  alerts/
+    PassAlerts.kt  One alarm at a time for the next visible ISS pass; receiver re-arms after reboot.
   data/
     Net.kt       One GET; every failure becomes a sentence for the screen.
     Feeds.kt     Every public feed, and the 2-hour TLE disk cache.
@@ -19,6 +23,7 @@ app/src/main/java/com/verisonder/sondereye/
     TileLoader.kt     Imagery downloads, newest first, stale requests dropped.
   ui/
     MainActivity.kt  State, refresh, auto-refresh (only while on screen).
+    SkyActivity.kt   Sky view: CameraX preview, rotation-vector sensor, labels projected on top.
     Screen.kt        Compose overlays: status readout, buttons, quake card, layers panel.
     Theme.kt         Palette; the marker colours come from here.
 ```
@@ -31,7 +36,11 @@ app/src/main/java/com/verisonder/sondereye/
 - **No float jitter.** Every object is positioned relative to the eye in double
   precision before becoming floats: tiles by their centre (vertices stored relative to
   it), markers per frame. The GPU never sees a coordinate near 6,400 km.
-- **Imagery** is Esri World Imagery, Web Mercator, 256 px tiles, zoom 2 to 18.
+- **Imagery**: one base source plus transparent overlays drawn over it on the same
+  meshes. Sources with less detail are stretched from their deepest zoom; a 404
+  (blankTile=false) means "no more detail here", not an error. Tiles download 8 at a
+  time across two hostnames, parents before children, and are kept on disk (500 MB).
+- **Imagery** zoom 2 to 20.
   Tiles split until they show at no more than 384 px, capped at 180 on screen.
   A missing tile shows its nearest loaded ancestor, stretched, until it arrives.
   Skirts under each tile hide cracks between detail levels. Polar caps close the

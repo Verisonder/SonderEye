@@ -6,20 +6,19 @@ Live public data on a 3D globe, on your phone. Free and open source, no account,
 
 Test builds only.
 
-- Native 3D globe drawn with OpenGL ES 3.0: satellite imagery that sharpens as you zoom, atmosphere glow.
-- Drag, pinch toward a point, twist to rotate, fling, double-tap to zoom.
-- **Earthquakes** (USGS): minimum magnitude, period, optional refresh every 5 minutes.
-- **Flights** (adsb.lol): live aircraft within 250 nm of the screen centre, pointing where they fly, every 10 s.
-- **Satellites** (CelesTrak): space stations, brightest, weather or science satellites, positions computed
-  on the phone every second, orbit line for the selected one, next passes over you.
-- **Natural events** (NASA EONET): open wildfires, volcanoes, storms and ice.
-- **Where I am**: your position from the phone's GPS and network, only while the app is open.
-- Every failure (a feed, the location, imagery tiles, graphics) is shown on screen.
+- Native 3D globe (OpenGL ES 3.0) from the whole Earth down to about 120 m, with atmosphere.
+- **Map**: satellite, streets, or today's Earth from space (NASA VIIRS), with optional roads and place names.
+- Drag, pinch toward a point, twist to rotate, fling, double-tap to zoom, long-press for the weather there.
+- **Earthquakes** (USGS), **flights** (adsb.lol), **satellites** (CelesTrak, computed on the phone),
+  **natural events** (NASA EONET), **rain radar** (RainViewer), **weather** (Open-Meteo).
+- **Where I am**, with the weather where you are and the next satellite passes over you.
+- **Sky view**: point the phone at the sky to see satellites, aircraft, the Sun and the Moon labelled.
+- **ISS pass alerts**: a notification about 10 minutes before each pass you can see.
+- Tiles are kept on disk (up to 500 MB), so places seen once load instantly.
+- Every failure is shown on screen.
 
 ## Roadmap
 
-- Sky view: point the phone up to see what is overhead.
-- Pass alerts for the ISS.
 - Ships and webcams (these sources need a free key).
 
 ## Data sources
@@ -30,9 +29,13 @@ Test builds only.
 | Flights | [adsb.lol](https://adsb.lol), community-fed ADS-B | None |
 | Satellites | [CelesTrak](https://celestrak.org) orbital elements, cached 2 h as they ask | None |
 | Natural events | [NASA EONET](https://eonet.gsfc.nasa.gov) | None |
+| Streets, roads, labels | Esri World Street Map and reference layers | None |
+| Today from space | NASA GIBS, VIIRS NOAA-20 true colour | None |
+| Rain radar | [RainViewer](https://www.rainviewer.com/api.html), personal use, zoom 7 at most | None |
+| Weather | [Open-Meteo](https://open-meteo.com) | None |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
 
-Permissions: internet, and location only when "Where I am" is switched on.
+Permissions: internet; location only for "Where I am"; camera only for the sky view; notifications only for pass alerts.
 
 ## Building
 

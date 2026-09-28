@@ -147,7 +147,7 @@ data class CameraState(
     fun view(width: Int, height: Int): View = View(this, width, height)
 
     companion object {
-        const val MIN_ALT = 800.0
+        const val MIN_ALT = 120.0
         const val MAX_ALT = 40_000_000.0
         val HOME = CameraState(lat = 25.0, lon = 0.0, alt = 20_000_000.0, heading = 0.0)
     }
@@ -256,7 +256,6 @@ data class TileKey(val z: Int, val x: Int, val y: Int) {
         return doubleArrayOf(s, (x - (ancestor.x shl dz)) * s, (y - (ancestor.y shl dz)) * s)
     }
 
-    fun url() = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
 }
 
 object TileSelect {

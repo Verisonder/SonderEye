@@ -27,6 +27,8 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     interface Listener {
         /** A marker was tapped (its key), or empty globe (null). */
         fun onTap(key: String?)
+        /** Long press on the ground: (lat, lon). */
+        fun onLongPress(lat: Double, lon: Double)
         fun onStatus(status: GlobeStatus)
         fun onError(message: String)
     }
@@ -43,6 +45,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         setEGLContextClientVersion(3)
         preserveEGLContextOnPause = true
         renderer = GlobeRenderer(
+            cacheDir = context.cacheDir,
             camera = { cam },
             density = density,
             requestRender = { requestRender() },
@@ -96,6 +99,13 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     fun center(): DoubleArray = cam.let { doubleArrayOf(it.lat, it.lon, it.alt) }
 
     fun home() = flyTo(CameraState.HOME)
+
+    /** The map underneath and the transparent layers over it. */
+    fun setMap(base: com.verisonder.sondereye.core.TileSource, overlays: List<com.verisonder.sondereye.core.TileSource>) {
+        renderer.base = base
+        renderer.overlays = overlays
+        requestRender()
+    }
 
     fun release() = renderer.shutdown()
 
@@ -232,6 +242,14 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
                 ms = 350,
             )
             return true
+        }
+
+        override fun onLongPress(e: MotionEvent) {
+            if (scaler.isInProgress) return
+            val p = view().pick(e.x.toDouble(), e.y.toDouble()) ?: return
+            val ll = Geo.latLon(p)
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            listener.onLongPress(ll[0], ll[1])
         }
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {

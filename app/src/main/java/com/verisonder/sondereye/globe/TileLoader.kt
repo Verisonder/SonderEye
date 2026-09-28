@@ -3,6 +3,8 @@ package com.verisonder.sondereye.globe
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.verisonder.sondereye.core.TileKey
+import com.verisonder.sondereye.core.TileSource
+import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
@@ -14,75 +16,105 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
+/** A tile of one source. */
+data class SourcedTile(val source: TileSource, val key: TileKey) {
+    val id get() = source.id + "/" + key.z + "/" + key.x + "/" + key.y
+    override fun equals(other: Any?) = other is SourcedTile && other.source.id == source.id && other.key == key
+    override fun hashCode() = source.id.hashCode() * 31 + key.hashCode()
+}
+
 /**
- * Downloads imagery tiles on a small pool. The queue is last-in-first-out: when the user
- * moves, the tiles for where they are now load before the ones they flew past, and a
- * tile nobody has asked for in a while is dropped without downloading.
- * HTTP caching (HttpResponseCache, installed by the app) makes revisits free.
+ * Downloads tiles on a pool of 8. Last-in-first-out: when the user moves, the tiles for
+ * where they are now load before the ones they flew past, and a tile nobody has asked
+ * for in a while is dropped without downloading. Every tile is kept on disk, so a place
+ * seen once loads instantly the next time.
  */
 class TileLoader(
-    private val onLoaded: (TileKey, Bitmap) -> Unit,
-    private val onFailed: (TileKey, String) -> Unit,
+    private val cacheDir: File,
+    private val onLoaded: (SourcedTile, Bitmap) -> Unit,
+    /** The source has nothing there (404): not an error, the globe keeps the parent. */
+    private val onAbsent: (SourcedTile) -> Unit,
+    private val onFailed: (SourcedTile, String) -> Unit,
 ) {
     private class Lifo : LinkedBlockingDeque<Runnable>() {
         override fun offer(e: Runnable): Boolean = offerFirst(e)
     }
 
-    private val pool = ThreadPoolExecutor(4, 4, 30, TimeUnit.SECONDS, Lifo())
-    private val inFlight = ConcurrentHashMap.newKeySet<TileKey>()
-    private val lastWanted = ConcurrentHashMap<TileKey, Long>()
-    private val failedAt = ConcurrentHashMap<TileKey, Long>()
+    private val pool = ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, Lifo())
+    private val inFlight = ConcurrentHashMap.newKeySet<SourcedTile>()
+    private val lastWanted = ConcurrentHashMap<SourcedTile, Long>()
+    private val failedAt = ConcurrentHashMap<SourcedTile, Long>()
     private val frame = AtomicLong(0)
+
+    init {
+        pool.execute { trimDisk() }
+    }
 
     /** Called once per rendered frame, before [request]. */
     fun nextFrame() {
         frame.incrementAndGet()
     }
 
-    fun request(k: TileKey) {
-        lastWanted[k] = frame.get()
-        if (k in inFlight) return
-        val failed = failedAt[k]
+    fun request(t: SourcedTile) {
+        lastWanted[t] = frame.get()
+        if (t in inFlight) return
+        val failed = failedAt[t]
         if (failed != null && System.currentTimeMillis() - failed < RETRY_MS) return
-        if (!inFlight.add(k)) return
-        pool.execute { run(k) }
+        if (!inFlight.add(t)) return
+        pool.execute { run(t) }
     }
 
-    private fun run(k: TileKey) {
+    private fun run(t: SourcedTile) {
         try {
-            // Wanted within the last ~2 seconds of frames? Otherwise it scrolled away.
-            val stale = frame.get() - (lastWanted[k] ?: 0L) > STALE_FRAMES
+            val stale = frame.get() - (lastWanted[t] ?: 0L) > STALE_FRAMES
             if (stale) return
-            val bmp = fetch(k)
-            failedAt.remove(k)
-            onLoaded(k, bmp)
+            val bytes = disk(t).takeIf { it.exists() }?.let { f -> runCatching { f.readBytes() }.getOrNull() }
+                ?: download(t) ?: return onAbsent(t)
+            val opts = BitmapFactory.Options().apply {
+                inPreferredConfig = if (t.source.transparent) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
+            }
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            if (bmp == null) {
+                disk(t).delete()
+                throw Failure("not an image (${bytes.size} bytes)")
+            }
+            failedAt.remove(t)
+            onLoaded(t, bmp)
         } catch (e: Failure) {
-            failedAt[k] = System.currentTimeMillis()
-            onFailed(k, e.message ?: "unknown error")
+            failedAt[t] = System.currentTimeMillis()
+            onFailed(t, e.message ?: "unknown error")
         } finally {
-            inFlight.remove(k)
+            inFlight.remove(t)
         }
     }
 
     private class Failure(msg: String) : Exception(msg)
 
-    private fun fetch(k: TileKey): Bitmap {
+    private fun disk(t: SourcedTile) = File(cacheDir, "tiles/" + t.id)
+
+    /** The tile's bytes, or null when the source has nothing there. Saved to disk. */
+    private fun download(t: SourcedTile): ByteArray? {
         val conn = try {
-            URL(k.url()).openConnection() as HttpURLConnection
+            URL(t.source.url(t.key)).openConnection() as HttpURLConnection
         } catch (e: IOException) {
             throw Failure("could not open (${e.message})")
         }
         try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 15_000
-            conn.useCaches = true
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
             val code = conn.responseCode
+            if (code == 404 || code == 204) return null
             if (code != 200) throw Failure("HTTP $code")
             val bytes = conn.inputStream.use { it.readBytes() }
-            val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                ?: throw Failure("not an image (${bytes.size} bytes)")
+            runCatching {
+                val f = disk(t)
+                f.parentFile?.mkdirs()
+                val tmp = File(f.path + ".part")
+                tmp.writeBytes(bytes)
+                tmp.renameTo(f)
+            }
+            return bytes
         } catch (e: UnknownHostException) {
             throw Failure("no connection")
         } catch (e: SocketTimeoutException) {
@@ -94,6 +126,20 @@ class TileLoader(
         }
     }
 
+    /** Keeps the tile cache under [DISK_CAP] by deleting the least recently written files. */
+    private fun trimDisk() {
+        val root = File(cacheDir, "tiles")
+        val files = root.walkTopDown().filter { it.isFile }.toMutableList()
+        var total = files.sumOf { it.length() }
+        if (total <= DISK_CAP) return
+        files.sortBy { it.lastModified() }
+        for (f in files) {
+            if (total <= DISK_CAP * 3 / 4) break
+            total -= f.length()
+            f.delete()
+        }
+    }
+
     fun shutdown() {
         pool.shutdownNow()
     }
@@ -101,5 +147,6 @@ class TileLoader(
     companion object {
         private const val RETRY_MS = 20_000L
         private const val STALE_FRAMES = 120L
+        private const val DISK_CAP = 500L * 1024 * 1024
     }
 }

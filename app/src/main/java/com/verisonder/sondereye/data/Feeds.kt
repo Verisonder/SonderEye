@@ -3,6 +3,8 @@ package com.verisonder.sondereye.data
 import com.verisonder.sondereye.core.Adsb
 import com.verisonder.sondereye.core.Eonet
 import com.verisonder.sondereye.core.MinMag
+import com.verisonder.sondereye.core.OpenMeteo
+import com.verisonder.sondereye.core.RainViewer
 import com.verisonder.sondereye.core.Period
 import com.verisonder.sondereye.core.Sky
 import com.verisonder.sondereye.core.Tle
@@ -18,6 +20,11 @@ object Feeds {
         Net.get(Adsb.url(lat, lon, Adsb.MAX_NM), "Flights", "adsb.lol", Adsb::parse)
 
     fun events() = Net.get(Eonet.URL, "Natural events", "NASA EONET", Eonet::parse)
+
+    fun weather(lat: Double, lon: Double) = Net.get(OpenMeteo.url(lat, lon), "Weather", "Open-Meteo", OpenMeteo::parse)
+
+    /** Latest radar frame: [host, path] for the tile URLs. */
+    fun radar() = Net.get(RainViewer.URL, "Rain radar", "RainViewer", RainViewer::latest)
 
     /**
      * Orbital elements, cached on disk for 2 hours as CelesTrak asks. When a download

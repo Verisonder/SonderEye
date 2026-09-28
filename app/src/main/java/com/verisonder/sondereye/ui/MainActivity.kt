@@ -31,9 +31,13 @@ import com.verisonder.sondereye.core.Pass
 import com.verisonder.sondereye.core.Quake
 import com.verisonder.sondereye.core.Sgp4
 import com.verisonder.sondereye.core.Sky
+import com.verisonder.sondereye.core.TileSource
 import com.verisonder.sondereye.core.V3
+import com.verisonder.sondereye.core.Weather
+import com.verisonder.sondereye.alerts.PassAlerts
 import com.verisonder.sondereye.data.Feeds
 import com.verisonder.sondereye.data.Layers
+import com.verisonder.sondereye.data.MapStyle
 import com.verisonder.sondereye.data.Net
 import com.verisonder.sondereye.data.Settings
 import com.verisonder.sondereye.data.Where
@@ -67,6 +71,14 @@ sealed class Sel(val key: String) {
     class OfSat(val s: Sgp4) : Sel("s:" + s.tle.norad)
     class OfEvent(val e: NatEvent) : Sel("e:" + e.id)
     object Me : Sel("me")
+    /** A spot picked by a long press, for its weather. */
+    class OfPlace(val lat: Double, val lon: Double) : Sel("p:%.4f,%.4f".format(java.util.Locale.ROOT, lat, lon))
+}
+
+/** Weather for the selected spot (or for you). */
+class WeatherState(val key: String) {
+    var weather by mutableStateOf<Weather?>(null)
+    var error by mutableStateOf<String?>(null)
 }
 
 /** Everything the screen shows. Plain Compose state; the activity survives rotation (manifest). */
@@ -86,6 +98,12 @@ class EyeState {
     var globeError by mutableStateOf<String?>(null)
     var selected by mutableStateOf<Sel?>(null)
     var passes by mutableStateOf<List<Pass>?>(null)
+    var weather by mutableStateOf<WeatherState?>(null)
+    /** [host, path] of the latest radar frame. */
+    val radar = Feed<String>()
+    var alertProblem by mutableStateOf<String?>(null)
+    /** Credits for the map layers on screen, as the providers ask. */
+    var credits by mutableStateOf(listOf(TileSource.SATELLITE.credit))
     var layersOpen by mutableStateOf(false)
     /** Wall clock for moving things, ticking once a second while the app is on screen. */
     var clock by mutableLongStateOf(System.currentTimeMillis())
@@ -101,6 +119,11 @@ class MainActivity : ComponentActivity() {
     private var flyToMeOnFix = false
     /** Android stops showing the permission dialog after repeated denials. */
     private var locationBlocked = false
+
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) schedulePassAlerts()
+        else state.alertProblem = "Pass alerts: notifications are blocked for SonderEye. Allow them in the app's settings."
+    }
 
     private val askLocation = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
         if (r.values.any { it }) {
@@ -123,8 +146,13 @@ class MainActivity : ComponentActivity() {
         where = Where(
             this,
             onFix = { loc ->
+                val first = state.me == null
                 state.me = loc
                 state.meProblem = null
+                if (first) {
+                    store.saveHome(loc.latitude, loc.longitude)
+                    if (state.layers.passAlerts) schedulePassAlerts()
+                }
                 globe?.setLayer("me", listOf(meMarker(loc)))
                 if (flyToMeOnFix) {
                     flyToMeOnFix = false
@@ -139,11 +167,18 @@ class MainActivity : ComponentActivity() {
         if (gl >= 0x30000) {
             globe = GlobeView(this, object : GlobeView.Listener {
                 override fun onTap(key: String?) = select(key?.let(::selectionFor))
+                override fun onLongPress(lat: Double, lon: Double) {
+                    val sel = Sel.OfPlace(lat, lon)
+                    select(sel)
+                    globe?.setLayer("pin", listOf(Marker(sel.key, lat, lon, 16f * density, Palette.accent.toArgb())))
+                    globe?.select(sel.key, fly = false)
+                }
                 override fun onStatus(status: GlobeStatus) { state.globeStatus = status }
                 override fun onError(message: String) { state.globeError = message }
             })
             // Fixes the draw order: later layers on top.
-            for (name in listOf("quakes", "events", "flights", "sats", "me")) globe?.setLayer(name, emptyList())
+            for (name in listOf("quakes", "events", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
+            applyMap()
         } else {
             state.globeError = "Globe: this phone reports OpenGL ES ${gl shr 16}.${gl and 0xFFFF}; 3.0 is required"
         }
@@ -167,12 +202,14 @@ class MainActivity : ComponentActivity() {
                         },
                         myLocation = ::myLocation,
                         fixLocation = ::fixLocation,
+                        sky = { startActivity(Intent(this, SkyActivity::class.java)) },
                     ),
                 )
             }
         }
 
         refreshAll()
+        if (state.layers.passAlerts) schedulePassAlerts()
 
         // Everything below runs only while the app is on screen. Nothing in the background.
         lifecycleScope.launch {
@@ -186,6 +223,7 @@ class MainActivity : ComponentActivity() {
                         state.clock = now
                         if (l.satellites && state.sats.items.isNotEmpty()) updateSatellites(now, orbit = tick % 30 == 0L)
                         if (l.flights && !state.flights.loading && now - state.flights.attemptAt >= FLIGHTS_MS) loadFlights()
+                        if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.quakes && l.autoRefresh && !state.quakes.loading && now - state.quakes.attemptAt >= QUAKES_AUTO_MS) loadQuakes()
                         tick++
                         delay(1000)
@@ -207,6 +245,14 @@ class MainActivity : ComponentActivity() {
         if (new.flights != old.flights) loadFlights()
         if (new.satellites != old.satellites || new.satGroup != old.satGroup) loadSatellites()
         if (new.events != old.events) loadEvents()
+        if (new.map != old.map || new.roads != old.roads || new.labels != old.labels) applyMap()
+        if (new.radar != old.radar) loadRadar()
+        if (new.passAlerts != old.passAlerts) {
+            if (new.passAlerts) enablePassAlerts() else {
+                PassAlerts.cancel(this)
+                state.alertProblem = null
+            }
+        }
         if (new.location != old.location) {
             if (new.location) {
                 myLocation()
@@ -221,7 +267,87 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshAll() {
-        loadQuakes(); loadFlights(); loadSatellites(); loadEvents()
+        loadQuakes(); loadFlights(); loadSatellites(); loadEvents(); loadRadar()
+        val w = state.weather
+        if (w != null) state.selected?.let { loadWeather(it) }
+    }
+
+    // ---- Map and weather ----------------------------------------------------------------
+
+    /** Base map and overlays from the settings (and the radar frame, when on). */
+    private fun applyMap() {
+        val l = state.layers
+        val base = when (l.map) {
+            MapStyle.SATELLITE -> TileSource.SATELLITE
+            MapStyle.STREETS -> TileSource.STREETS
+            MapStyle.TODAY -> TileSource.TODAY
+        }
+        val overlays = ArrayList<TileSource>()
+        // Streets already draws its own roads and names.
+        if (l.map != MapStyle.STREETS && l.roads) overlays.add(TileSource.ROADS)
+        if (l.map != MapStyle.STREETS && l.labels) overlays.add(TileSource.LABELS)
+        val r = state.radar.items
+        if (l.radar && r.size == 2) overlays.add(TileSource.radar(r[0], r[1]))
+        globe?.setMap(base, overlays)
+        state.credits = (listOf(base) + overlays).map { it.credit }.distinct()
+    }
+
+    private fun loadRadar() {
+        if (!state.layers.radar) {
+            state.radar.items = emptyList(); state.radar.error = null; state.radar.updatedAt = null
+            applyMap()
+            return
+        }
+        state.radar.loading = true
+        state.radar.attemptAt = System.currentTimeMillis()
+        run("radar") {
+            val out = withContext(Dispatchers.IO) { Feeds.radar() }
+            state.radar.loading = false
+            when (out) {
+                is Net.Outcome.Ok -> {
+                    state.radar.items = listOf(out.value.first, out.value.second)
+                    state.radar.updatedAt = System.currentTimeMillis()
+                    state.radar.error = null
+                    applyMap()
+                }
+                is Net.Outcome.Failed -> state.radar.error = out.message
+            }
+        }
+    }
+
+    /** Current weather for a long-pressed spot or for you. */
+    private fun loadWeather(sel: Sel) {
+        val ll = when (sel) {
+            is Sel.OfPlace -> doubleArrayOf(sel.lat, sel.lon)
+            Sel.Me -> state.me?.let { doubleArrayOf(it.latitude, it.longitude) }
+            else -> null
+        } ?: return
+        val w = WeatherState(sel.key)
+        state.weather = w
+        run("weather") {
+            when (val out = withContext(Dispatchers.IO) { Feeds.weather(ll[0], ll[1]) }) {
+                is Net.Outcome.Ok -> w.weather = out.value
+                is Net.Outcome.Failed -> w.error = out.message
+            }
+        }
+    }
+
+    // ---- Pass alerts --------------------------------------------------------------------
+
+    private fun enablePassAlerts() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            schedulePassAlerts()
+        }
+        if (store.home() == null && state.me == null) myLocation()
+    }
+
+    private fun schedulePassAlerts() {
+        PassAlerts.ensureChannel(this)
+        PassAlerts.schedule(this) { problem -> runOnUiThread { state.alertProblem = problem } }
     }
 
     // ---- Layers -------------------------------------------------------------------------
@@ -371,6 +497,7 @@ class MainActivity : ComponentActivity() {
 
     private fun selectionFor(key: String): Sel? = when {
         key == "me" -> Sel.Me
+        key.startsWith("p:") -> (state.selected as? Sel.OfPlace)?.takeIf { it.key == key }
         key.startsWith("q:") -> state.quakes.items.firstOrNull { "q:" + it.id == key }?.let { Sel.OfQuake(it) }
         key.startsWith("f:") -> state.flights.items.firstOrNull { "f:" + it.hex == key }?.let { Sel.OfFlight(it) }
         key.startsWith("s:") -> state.sats.items.firstOrNull { "s:" + it.tle.norad == key }?.let { Sel.OfSat(it) }
@@ -381,6 +508,9 @@ class MainActivity : ComponentActivity() {
     private fun select(sel: Sel?) {
         state.selected = sel
         state.passes = null
+        state.weather = null
+        if (sel !is Sel.OfPlace) globe?.setLayer("pin", emptyList())
+        if (sel is Sel.OfPlace || sel is Sel.Me) loadWeather(sel)
         globe?.setPath(if (sel is Sel.OfSat) orbitPath(sel.s, System.currentTimeMillis()) else null)
         recomputePasses()
     }
@@ -475,6 +605,8 @@ class MainActivity : ComponentActivity() {
         private const val QUAKES_AUTO_MS = 5 * 60_000L
         /** adsb.lol is a free community service: one area request every 10 s is plenty. */
         private const val FLIGHTS_MS = 10_000L
+        /** RainViewer publishes a frame every 10 minutes. */
+        private const val RADAR_MS = 10 * 60_000L
         /** Camera height when flying to you: a city and its surroundings. */
         private const val ME_ALT = 25_000.0
         const val ISS = 25544

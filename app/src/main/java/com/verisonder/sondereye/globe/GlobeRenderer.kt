@@ -10,7 +10,9 @@ import com.verisonder.sondereye.core.M4
 import com.verisonder.sondereye.core.TileKey
 import com.verisonder.sondereye.core.TileMesh
 import com.verisonder.sondereye.core.TileSelect
+import com.verisonder.sondereye.core.TileSource
 import com.verisonder.sondereye.core.V3
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -54,6 +56,7 @@ data class GlobeStatus(
  * volatile fields or queues; nothing here touches views.
  */
 class GlobeRenderer(
+    cacheDir: File,
     private val camera: () -> CameraState,
     private val density: Float,
     private val requestRender: () -> Unit,
@@ -66,14 +69,27 @@ class GlobeRenderer(
     /** A line through space (a satellite's orbit), in world metres; null for none. */
     @Volatile var path: List<V3>? = null
 
-    private val uploads = ConcurrentLinkedQueue<Pair<TileKey, Bitmap>>()
+    /** The map underneath. */
+    @Volatile var base: TileSource = TileSource.SATELLITE
+    /** Transparent layers on top of it (roads, labels, radar), in drawing order. */
+    @Volatile var overlays: List<TileSource> = emptyList()
+
+    private val uploads = ConcurrentLinkedQueue<Pair<SourcedTile, Bitmap>>()
+    private val absentQueue = ConcurrentLinkedQueue<SourcedTile>()
+    /** Tiles the source has nothing for. GL thread only. */
+    private val absent = HashSet<SourcedTile>()
     @Volatile private var failures = 0
     @Volatile private var lastFailure: String? = null
 
     private val loader = TileLoader(
-        onLoaded = { k, b ->
-            uploads.add(k to b)
+        cacheDir = cacheDir,
+        onLoaded = { t, b ->
+            uploads.add(t to b)
             failures = 0
+            requestRender()
+        },
+        onAbsent = { t ->
+            absentQueue.add(t)
             requestRender()
         },
         onFailed = { _, msg ->
@@ -92,7 +108,7 @@ class GlobeRenderer(
     private var pointProg = 0
     private var glowProg = 0
     private val indexBuffers = HashMap<Int, Pair<Int, Int>>() // segments -> (ibo, count)
-    private val textures = LinkedHashMap<TileKey, Int>(64, 0.75f, true)
+    private val textures = LinkedHashMap<SourcedTile, Int>(64, 0.75f, true)
     private val meshes = LinkedHashMap<TileKey, Int>(64, 0.75f, true)
     private var capVbo = 0
     private var capCount = 0
@@ -107,6 +123,7 @@ class GlobeRenderer(
         // A new context means every old id is gone; forget them without deleting.
         textures.clear()
         meshes.clear()
+        absent.clear()
         indexBuffers.clear()
         pathVbo = 0
         broken = false
@@ -159,36 +176,62 @@ class GlobeRenderer(
         val uUv = GLES30.glGetUniformLocation(tileProg, "uUv")
         val uHasTex = GLES30.glGetUniformLocation(tileProg, "uHasTex")
         val uColor = GLES30.glGetUniformLocation(tileProg, "uColor")
+        val uAlpha = GLES30.glGetUniformLocation(tileProg, "uAlpha")
         GLES30.glUniform1i(GLES30.glGetUniformLocation(tileProg, "uTex"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glUniform1f(uAlpha, 1f)
 
-        for (k in tiles) {
-            var tex = textures[k]
-            var uv = UV_IDENTITY
-            if (tex == null) {
-                loading++
-                loader.request(k)
-                // Meanwhile show the closest ancestor that has arrived, stretched.
-                var a = k.parent()
-                while (a != null) {
-                    val t = textures[a]
-                    if (t != null) { tex = t; uv = k.uvIn(a); break }
-                    a = a.parent()
+        val baseSrc = base
+        val overlaySrcs = overlays
+        // Base first, opaque; then each overlay over it on the same meshes.
+        for ((pass, src) in (listOf(baseSrc) + overlaySrcs).withIndex()) {
+            if (pass == 1) {
+                GLES30.glEnable(GLES30.GL_BLEND)
+                GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                GLES30.glDepthMask(false)
+            }
+            GLES30.glUniform1f(uAlpha, src.alpha)
+            for (k in tiles) {
+                val want = SourcedTile(src, src.keyFor(k))
+                var found: SourcedTile? = null
+                if (textures.containsKey(want)) {
+                    found = want
+                } else {
+                    if (want !in absent) {
+                        loading++
+                        loader.request(want)
+                        // Coarse before fine: the parent arrives first and fills in quickly.
+                        want.key.parent()?.let { p ->
+                            val pt = SourcedTile(src, p)
+                            if (!textures.containsKey(pt) && pt !in absent) loader.request(pt)
+                        }
+                    }
+                    var a = want.key.parent()
+                    while (a != null && found == null) {
+                        val t = SourcedTile(src, a)
+                        if (textures.containsKey(t)) found = t
+                        a = a.parent()
+                    }
                 }
-                rootOf(k)?.let { if (textures[it] == null) loader.request(it) }
+                if (found == null && src.transparent) continue // nothing to lay over this tile yet
+                M4.toFloat(view.mvp(k.center()), mvp)
+                GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
+                if (found != null) {
+                    val uv = k.uvIn(found.key)
+                    GLES30.glUniform3f(uUv, uv[0].toFloat(), uv[1].toFloat(), uv[2].toFloat())
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textures[found]!!)
+                    GLES30.glUniform1f(uHasTex, 1f)
+                } else {
+                    GLES30.glUniform3f(uUv, 1f, 0f, 0f)
+                    GLES30.glUniform1f(uHasTex, 0f)
+                    GLES30.glUniform3f(uColor, OCEAN_R, OCEAN_G, OCEAN_B)
+                }
+                drawMesh(mesh(k), TileMesh.segments(k.z))
             }
-            M4.toFloat(view.mvp(k.center()), mvp)
-            GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
-            GLES30.glUniform3f(uUv, uv[0].toFloat(), uv[1].toFloat(), uv[2].toFloat())
-            if (tex != null) {
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex)
-                GLES30.glUniform1f(uHasTex, 1f)
-            } else {
-                GLES30.glUniform1f(uHasTex, 0f)
-                GLES30.glUniform3f(uColor, OCEAN_R, OCEAN_G, OCEAN_B)
-            }
-            drawMesh(mesh(k), TileMesh.segments(k.z))
         }
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glDepthMask(true)
+        GLES30.glUniform1f(uAlpha, 1f)
 
         drawCaps(view, uMvp, uHasTex, uColor)
         drawPath(view, uMvp, uHasTex, uColor)
@@ -204,13 +247,8 @@ class GlobeRenderer(
         }
     }
 
-    private fun rootOf(k: TileKey): TileKey? {
-        var a: TileKey? = k
-        while (a != null && a.z > TileSelect.ROOT_Z) a = a.parent()
-        return if (a == k) null else a
-    }
-
     private fun uploadPending() {
+        while (true) absent.add(absentQueue.poll() ?: break)
         var n = 0
         while (n < UPLOADS_PER_FRAME) {
             val (k, bmp) = uploads.poll() ?: break
@@ -226,7 +264,7 @@ class GlobeRenderer(
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
                 textures[k] = ids[0]
             }
-            if (k.z == TileSelect.ROOT_Z) sampleCapColour(k, bmp)
+            if (k.source === base && k.key.z == TileSelect.ROOT_Z) sampleCapColour(k.key, bmp)
             bmp.recycle()
             n++
         }
@@ -473,12 +511,12 @@ class GlobeRenderer(
     }
 
     companion object {
-        const val MAX_ZOOM = 18
+        const val MAX_ZOOM = 20
         private const val SPLIT_PX = 384.0 // 256 px images shown at no more than 1.5×
         private const val TILE_LIMIT = 180
-        private const val TEXTURE_CAP = 260
+        private const val TEXTURE_CAP = 420
         private const val MESH_CAP = 400
-        private const val UPLOADS_PER_FRAME = 6
+        private const val UPLOADS_PER_FRAME = 10
         private val UV_IDENTITY = doubleArrayOf(1.0, 0.0, 0.0)
 
         private const val SPACE_R = 0.012f; private const val SPACE_G = 0.024f; private const val SPACE_B = 0.039f
@@ -501,10 +539,16 @@ precision mediump float;
 uniform sampler2D uTex;
 uniform float uHasTex;
 uniform vec3 uColor;
+uniform float uAlpha;
 in vec2 vUv;
 out vec4 outColor;
 void main() {
-    outColor = uHasTex > 0.5 ? vec4(texture(uTex, vUv).rgb, 1.0) : vec4(uColor, 1.0);
+    if (uHasTex > 0.5) {
+        vec4 t = texture(uTex, vUv);
+        outColor = vec4(t.rgb, t.a * uAlpha);
+    } else {
+        outColor = vec4(uColor, 1.0);
+    }
 }"""
 
         private const val POINT_VS = """#version 300 es

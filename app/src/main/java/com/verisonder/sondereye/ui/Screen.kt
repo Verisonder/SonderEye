@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -81,7 +82,9 @@ import com.verisonder.sondereye.core.Period
 import com.verisonder.sondereye.core.Quake
 import com.verisonder.sondereye.core.Sgp4
 import com.verisonder.sondereye.core.Sky
+import com.verisonder.sondereye.core.Weather
 import com.verisonder.sondereye.data.Layers
+import com.verisonder.sondereye.data.MapStyle
 import com.verisonder.sondereye.data.SatGroup
 import com.verisonder.sondereye.globe.GlobeView
 import kotlinx.coroutines.delay
@@ -98,6 +101,7 @@ class Actions(
     val home: () -> Unit,
     val myLocation: () -> Unit,
     val fixLocation: () -> Unit,
+    val sky: () -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -126,9 +130,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             )
         }
 
-        // Required by the imagery provider. Sits under the card when one is open.
+        // Required by the map providers. Sits under the card when one is open.
         Text(
-            "Imagery: Esri, Maxar, Earthstar Geographics",
+            state.credits.joinToString("  ·  "),
             color = Palette.dim.copy(alpha = 0.8f),
             fontSize = 10.sp,
             modifier = Modifier
@@ -161,6 +165,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                     RoundButton(Icons.Default.Refresh, "Refresh", onClick = actions.refresh)
                 }
                 RoundButton(Icons.Default.LocationOn, "Where I am", tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+                RoundButton(Icons.Default.Star, "Sky view", onClick = actions.sky)
                 RoundButton(Icons.Default.Home, "Whole Earth", onClick = actions.home)
             }
         }
@@ -250,6 +255,10 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 "open, last 30 days",
             )
         }
+        if (l.radar) {
+            any = true
+            LayerLine(Color(0xFF3FA7FF), "Rain radar", if (state.radar.updatedAt == null) "loading…" else "latest 10-minute frame, ${clock(state.radar.updatedAt!!)}")
+        }
         if (!any) Text("All layers off", color = Palette.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         if (l.location && state.me == null && state.meProblem == null) {
             Text("Finding where you are…", color = Palette.dim, fontSize = 13.sp)
@@ -261,9 +270,10 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
+        state.alertProblem?.let { ErrorLine(it, null) }
         state.meProblem?.let { ErrorLine(it, actions.fixLocation) }
         if (g != null && g.failures > 0) ErrorLine("Imagery: ${g.failures} tiles failed (${g.lastFailure}). Retrying every 20 s.", null)
         state.globeError?.let { ErrorLine(it, null) }
@@ -323,6 +333,7 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfFlight -> FlightBody(sel.f, context, close)
                 is Sel.OfSat -> SatBody(sel.s, state, actions, close)
                 is Sel.OfEvent -> EventBody(sel.e, now, context, close)
+                is Sel.OfPlace -> PlaceBody(sel, state, close)
                 Sel.Me -> MeBody(state, now, close)
             }
         }
@@ -401,8 +412,8 @@ private fun ColumnScope.SatBody(s: Sgp4, state: EyeState, actions: Actions, onCl
         passes.isEmpty() -> Line("No passes above 10° over you in the next 48 h.")
         else -> {
             Line("Next passes over you (above 10°):", Palette.text)
-            for (pass in passes.take(3)) Line(passLine(pass))
-            Line("Seen by eye only when the sky is dark and the satellite is still sunlit.")
+            for (pass in passes.take(4)) Line(passLine(pass) + if (pass.visible) ", visible" else "", if (pass.visible) Palette.satellite else Palette.dim)
+            Line("Visible: the satellite is sunlit while your sky is dark.")
         }
     }
     Spacer(Modifier.size(8.dp))
@@ -426,8 +437,42 @@ private fun ColumnScope.MeBody(state: EyeState, now: Long, onClose: () -> Unit) 
         val acc = if (me.hasAccuracy()) "within ${me.accuracy.roundToInt()} m" else "accuracy unknown"
         Line("$acc, ${Fmt.ago(me.time, now).lowercase()}")
     }
+    WeatherLines(state)
     Spacer(Modifier.size(8.dp))
 }
+
+@Composable
+private fun ColumnScope.PlaceBody(p: Sel.OfPlace, state: EyeState, onClose: () -> Unit) {
+    Header(null, Palette.accent, "Weather here", "%.4f, %.4f".format(p.lat, p.lon), onClose)
+    WeatherLines(state)
+    Spacer(Modifier.size(8.dp))
+}
+
+@Composable
+private fun WeatherLines(state: EyeState) {
+    val w = state.weather ?: return
+    val err = w.error
+    val data = w.weather
+    when {
+        err != null -> Line(err, Palette.error)
+        data == null -> Line("Getting the weather…")
+        else -> {
+            Text(
+                "${data.tempC.roundToInt()} °C, ${data.description.lowercase()}",
+                color = Palette.text, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp),
+            )
+            Line(weatherDetail(data))
+            Line("From Open-Meteo, now")
+        }
+    }
+}
+
+private fun weatherDetail(w: Weather): String = listOfNotNull(
+    w.windKmh?.let { k -> "wind ${k.roundToInt()} km/h" + (w.windFromDeg?.let { " from ${Sky.compass(it)}" } ?: "") },
+    w.humidity?.let { "humidity $it%" },
+    w.cloudPct?.let { "clouds $it%" },
+    w.precipMm?.takeIf { it > 0 }?.let { "rain %.1f mm".format(it) },
+).joinToString(", ").replaceFirstChar { it.uppercase() }
 
 // ---- Layers panel ----------------------------------------------------------------------------
 
@@ -458,6 +503,17 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit) {
             }
 
             Divider()
+            Text("Map", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
+            Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
+                Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
+                Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }
+            }
+
+            Divider()
+            Section("Rain radar", "RainViewer, last 10 minutes; long-press anywhere for its weather", s.radar) { change(s.copy(radar = it)) }
+
+            Divider()
             Section("Flights", "adsb.lol, near the screen centre, every 10 s", s.flights) { change(s.copy(flights = it)) }
 
             Divider()
@@ -466,6 +522,7 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit) {
                 Label("Group")
                 ChipRow(SatGroup.entries, s.satGroup, { it.label }, s.satellites) { change(s.copy(satGroup = it)) }
             }
+            Toggle("Alert me before visible ISS passes", s.passAlerts, true) { change(s.copy(passAlerts = it)) }
 
             Divider()
             Section("Natural events", "NASA EONET: fires, volcanoes, storms, ice", s.events) { change(s.copy(events = it)) }
@@ -484,6 +541,14 @@ private fun Section(title: String, sub: String, on: Boolean, toggle: (Boolean) -
             Text(sub, color = Palette.dim, fontSize = 12.sp)
         }
         Switch(checked = on, onCheckedChange = toggle)
+    }
+}
+
+@Composable
+private fun Toggle(text: String, on: Boolean, enabled: Boolean, toggle: (Boolean) -> Unit) {
+    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Switch(checked = on, enabled = enabled, onCheckedChange = toggle)
     }
 }
 

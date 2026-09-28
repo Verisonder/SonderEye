@@ -378,6 +378,8 @@ class Pass(
     val maxElevationDeg: Double,
     val startAzDeg: Double,
     val endAzDeg: Double,
+    /** At its highest the satellite is sunlit while your sky is dark (sun below -6°): you can see it. */
+    val visible: Boolean = false,
 )
 
 object Sky {
@@ -434,10 +436,17 @@ object Sky {
             if (!above && prevAbove && start >= 0) {
                 val stop = edge(t, next, false)
                 var maxEl = -90.0
+                var maxAt = start
                 var s = start
-                while (s <= stop) { maxEl = maxOf(maxEl, el(s)); s += 10_000 }
+                while (s <= stop) {
+                    val e = el(s)
+                    if (e > maxEl) { maxEl = e; maxAt = s }
+                    s += 10_000
+                }
                 val az = { ms: Long -> sat.ecefAt(ms)?.let { lookAngles(lat, lon, it)[1] } ?: 0.0 }
-                out.add(Pass(start, stop, maxEl, az(start), az(stop)))
+                val top = sat.ecefAt(maxAt)
+                val visible = top != null && Astro.sunlit(top, maxAt) && Astro.sunElevation(lat, lon, maxAt) < -6.0
+                out.add(Pass(start, stop, maxEl, az(start), az(stop), visible))
                 start = -1L
             }
             prevAbove = above
