@@ -9,3 +9,6 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Fetched by CI (tools/fetch_bluemarble.py), not committed.
+app/src/main/assets/bluemarble/

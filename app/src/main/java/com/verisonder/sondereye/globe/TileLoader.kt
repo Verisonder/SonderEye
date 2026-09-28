@@ -1,6 +1,7 @@
 package com.verisonder.sondereye.globe
 
 import android.graphics.Bitmap
+import android.content.res.AssetManager
 import android.graphics.BitmapFactory
 import com.verisonder.sondereye.core.TileKey
 import com.verisonder.sondereye.core.TileSource
@@ -31,6 +32,7 @@ data class SourcedTile(val source: TileSource, val key: TileKey) {
  */
 class TileLoader(
     private val cacheDir: File,
+    private val assets: AssetManager,
     private val onLoaded: (SourcedTile, Bitmap) -> Unit,
     /** The source has nothing there (404): not an error, the globe keeps the parent. */
     private val onAbsent: (SourcedTile) -> Unit,
@@ -41,6 +43,8 @@ class TileLoader(
     }
 
     private val pool = ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, Lifo())
+    /** Bundled tiles come from the APK in milliseconds: never queued behind downloads. */
+    private val assetPool = ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS, Lifo())
     private val inFlight = ConcurrentHashMap.newKeySet<SourcedTile>()
     private val lastWanted = ConcurrentHashMap<SourcedTile, Long>()
     private val failedAt = ConcurrentHashMap<SourcedTile, Long>()
@@ -61,15 +65,19 @@ class TileLoader(
         val failed = failedAt[t]
         if (failed != null && System.currentTimeMillis() - failed < RETRY_MS) return
         if (!inFlight.add(t)) return
-        pool.execute { run(t) }
+        (if (t.source.bundled) assetPool else pool).execute { run(t) }
     }
 
     private fun run(t: SourcedTile) {
         try {
             val stale = frame.get() - (lastWanted[t] ?: 0L) > STALE_FRAMES
             if (stale) return
-            val bytes = disk(t).takeIf { it.exists() }?.let { f -> runCatching { f.readBytes() }.getOrNull() }
-                ?: download(t) ?: return onAbsent(t)
+            val bytes = if (t.source.bundled) {
+                runCatching { assets.open(t.source.url(t.key)).use { it.readBytes() } }.getOrNull() ?: return onAbsent(t)
+            } else {
+                disk(t).takeIf { it.exists() }?.let { f -> runCatching { f.readBytes() }.getOrNull() }
+                    ?: download(t) ?: return onAbsent(t)
+            }
             val opts = BitmapFactory.Options().apply {
                 inPreferredConfig = if (t.source.transparent) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
             }
@@ -144,6 +152,7 @@ class TileLoader(
 
     fun shutdown() {
         pool.shutdownNow()
+        assetPool.shutdownNow()
     }
 
     companion object {

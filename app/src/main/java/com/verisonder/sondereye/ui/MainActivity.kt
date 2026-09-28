@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity() {
         val r = state.radar.items
         if (l.radar && r.size == 2) overlays.add(TileSource.radar(r[0], r[1]))
         globe?.setMap(base, overlays)
-        state.credits = (listOf(base) + overlays).map { it.credit }.distinct()
+        state.credits = (listOf(base) + overlays + TileSource.BLUE_MARBLE).map { it.credit }.distinct()
     }
 
     private fun loadRadar() {

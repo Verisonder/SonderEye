@@ -13,6 +13,8 @@ class TileSource(
     /** Shown under the map, as the provider asks. */
     val credit: String,
     val alpha: Float = 1f,
+    /** Shipped inside the app: [url] is an asset path, read without the network. */
+    val bundled: Boolean = false,
     private val template: (z: Int, x: Int, y: Int) -> String,
 ) {
     fun url(k: TileKey) = template(k.z, k.x, k.y)
@@ -31,6 +33,16 @@ class TileSource(
             // blankTile=false: where Esri has no imagery it answers 404 instead of a grey
             // "Map data not yet available" picture, so the globe keeps the sharpest real tile.
             "https://$host.arcgisonline.com/ArcGIS/rest/services/$service/MapServer/tile/$z/$y/$x?blankTile=false"
+        }
+
+        /**
+         * NASA Blue Marble Next Generation, zoom 2 to 6, inside the APK (fetched by CI,
+         * tools/fetch_bluemarble.py). Public domain. Drawn wherever it is sharper than
+         * what the chosen map has loaded so far, so the globe is never blank or blurry
+         * at country scale, even offline.
+         */
+        val BLUE_MARBLE = TileSource("bluemarble", 6, false, "Base: NASA Blue Marble", bundled = true) { z, x, y ->
+            "bluemarble/$z/$x/$y.jpg"
         }
 
         val SATELLITE = TileSource("esri-imagery", 20, false, "Imagery: Esri, Maxar, Earthstar Geographics", template = esri("World_Imagery"))

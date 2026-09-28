@@ -14,7 +14,8 @@ Test builds only.
 - **Where I am**, with the weather where you are and the next satellite passes over you.
 - **Sky view**: point the phone at the sky to see satellites, aircraft, the Sun and the Moon labelled.
 - **ISS pass alerts**: a notification about 10 minutes before each pass you can see.
-- Tiles are kept on disk (up to 500 MB), so places seen once load instantly.
+- The whole Earth down to country scale ships inside the app (NASA Blue Marble, zoom 2 to 6),
+  so the globe appears at once, even offline. Closer tiles are kept on disk (up to 500 MB).
 - Every failure is shown on screen.
 
 ## Roadmap
@@ -29,6 +30,7 @@ Test builds only.
 | Flights | [adsb.lol](https://adsb.lol), community-fed ADS-B | None |
 | Satellites | [CelesTrak](https://celestrak.org) orbital elements, cached 2 h as they ask | None |
 | Natural events | [NASA EONET](https://eonet.gsfc.nasa.gov) | None |
+| Built-in globe | NASA Blue Marble Next Generation via GIBS, public domain, bundled by CI | None |
 | Streets, roads, labels | Esri World Street Map and reference layers | None |
 | Today from space | NASA GIBS, VIIRS NOAA-20 true colour | None |
 | Rain radar | [RainViewer](https://www.rainviewer.com/api.html), personal use, zoom 7 at most | None |
@@ -45,6 +47,10 @@ JDK 17 and Gradle 8.9.
 gradle assembleDebug
 gradle testDebugUnitTest
 ```
+
+CI downloads the bundled Blue Marble tiles (`tools/fetch_bluemarble.py`, about 5,500 tiles,
+cached between runs) before building; a local build without them still works, just without
+the built-in globe.
 
 Pushes to `test/**` build a signed test APK and publish it as a pre-release named `test-<branch>`.
 Failed builds attach their output to the pre-release `ci-failure`.

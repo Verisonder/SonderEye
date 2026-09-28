@@ -31,6 +31,14 @@ jobs:
             exit 1
           fi
           echo "$RELEASE_KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+      - name: Cache the bundled Blue Marble tiles
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/bluemarble
+          key: bluemarble-${{ hashFiles('tools/fetch_bluemarble.py') }}
+      - name: Fetch the bundled Blue Marble tiles (NASA, public domain)
+        shell: bash
+        run: python3 tools/fetch_bluemarble.py app/src/main/assets/bluemarble 2>&1 | tee bluemarble.log
       - name: Build
         shell: bash
         env:
@@ -72,6 +80,8 @@ jobs:
           # CI logs are not fetchable from outside, so the error is attached to a
           # pre-release called ci-failure in this repository, where the API can read it.
           gradle --no-daemon assembleRelease > out.txt 2>&1 || true
+          # A failed tile download shows here too.
+          [ -f bluemarble.log ] && tail -n 30 bluemarble.log >> out.txt
           gh release view ci-failure --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create ci-failure --repo "$GITHUB_REPOSITORY" --prerelease \
               --title "Last CI failure" --notes "Replaced on every failed build."

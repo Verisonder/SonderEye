@@ -46,6 +46,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         preserveEGLContextOnPause = true
         renderer = GlobeRenderer(
             cacheDir = context.cacheDir,
+            assets = context.assets,
             camera = { cam },
             density = density,
             requestRender = { requestRender() },

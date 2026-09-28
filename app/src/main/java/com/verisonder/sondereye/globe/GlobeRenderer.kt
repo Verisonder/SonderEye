@@ -57,6 +57,7 @@ data class GlobeStatus(
  */
 class GlobeRenderer(
     cacheDir: File,
+    assets: android.content.res.AssetManager,
     private val camera: () -> CameraState,
     private val density: Float,
     private val requestRender: () -> Unit,
@@ -83,6 +84,7 @@ class GlobeRenderer(
 
     private val loader = TileLoader(
         cacheDir = cacheDir,
+        assets = assets,
         onLoaded = { t, b ->
             uploads.add(t to b)
             failures = 0
@@ -206,12 +208,17 @@ class GlobeRenderer(
                             if (!textures.containsKey(pt) && pt !in absent) loader.request(pt)
                         }
                     }
-                    var a = want.key.parent()
-                    while (a != null && found == null) {
-                        val t = SourcedTile(src, a)
-                        if (textures.containsKey(t)) found = t
-                        a = a.parent()
+                    found = loadedAncestor(src, want.key)
+                }
+                if (pass == 0 && found?.key != want.key) {
+                    // The bundled Blue Marble fills in wherever it is sharper than what has arrived.
+                    val bm = TileSource.BLUE_MARBLE
+                    val bmWant = SourcedTile(bm, bm.keyFor(k))
+                    val bmFound = if (textures.containsKey(bmWant)) bmWant else {
+                        if (bmWant !in absent) loader.request(bmWant)
+                        loadedAncestor(bm, bmWant.key)
                     }
+                    if (bmFound != null && bmFound.key.z > (found?.key?.z ?: -1)) found = bmFound
                 }
                 if (found == null && src.transparent) continue // nothing to lay over this tile yet
                 M4.toFloat(view.mvp(k.center()), mvp)
@@ -247,6 +254,17 @@ class GlobeRenderer(
         }
     }
 
+    /** Nearest ancestor of [k] whose texture is loaded, for [src]. */
+    private fun loadedAncestor(src: TileSource, k: TileKey): SourcedTile? {
+        var a = k.parent()
+        while (a != null) {
+            val t = SourcedTile(src, a)
+            if (textures.containsKey(t)) return t
+            a = a.parent()
+        }
+        return null
+    }
+
     private fun uploadPending() {
         while (true) absent.add(absentQueue.poll() ?: break)
         var n = 0
@@ -264,7 +282,8 @@ class GlobeRenderer(
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
                 textures[k] = ids[0]
             }
-            if (k.source === base && k.key.z == TileSelect.ROOT_Z) sampleCapColour(k.key, bmp)
+            // Cap colour from the bundled globe (always there), refined by the chosen map when it arrives.
+            if ((k.source === base || k.source === TileSource.BLUE_MARBLE) && k.key.z == TileSelect.ROOT_Z) sampleCapColour(k.key, bmp)
             bmp.recycle()
             n++
         }
