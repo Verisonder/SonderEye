@@ -45,7 +45,13 @@ data class Layers(
     val trails: Boolean = true,
     /** Surveillance cameras mapped in OpenStreetMap. */
     val cameras: Boolean = false,
+    val ships: Boolean = false,
+    val webcams: Boolean = false,
+    val fires: Boolean = false,
 )
+
+/** Personal keys for the sources that need one. Kept on the phone only. */
+data class Keys(val ais: String = "", val windy: String = "", val firms: String = "")
 
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -71,6 +77,9 @@ class Settings(context: Context) {
             lights = prefs.getBoolean("map.lights", d.lights),
             trails = prefs.getBoolean("flights.trails", d.trails),
             cameras = prefs.getBoolean("cameras.enabled", d.cameras),
+            ships = prefs.getBoolean("ships.enabled", d.ships),
+            webcams = prefs.getBoolean("webcams.enabled", d.webcams),
+            fires = prefs.getBoolean("fires.enabled", d.fires),
         )
     }
 
@@ -94,7 +103,20 @@ class Settings(context: Context) {
             .putBoolean("map.lights", s.lights)
             .putBoolean("flights.trails", s.trails)
             .putBoolean("cameras.enabled", s.cameras)
+            .putBoolean("ships.enabled", s.ships)
+            .putBoolean("webcams.enabled", s.webcams)
+            .putBoolean("fires.enabled", s.fires)
             .apply()
+    }
+
+    fun keys() = Keys(
+        prefs.getString("key.ais", "") ?: "",
+        prefs.getString("key.windy", "") ?: "",
+        prefs.getString("key.firms", "") ?: "",
+    )
+
+    fun saveKeys(k: Keys) {
+        prefs.edit().putString("key.ais", k.ais.trim()).putString("key.windy", k.windy.trim()).putString("key.firms", k.firms.trim()).apply()
     }
 
     /** Last known position, for pass alerts computed while the app is closed. */

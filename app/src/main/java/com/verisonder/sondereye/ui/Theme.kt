@@ -25,6 +25,9 @@ object Palette {
     val me = Color(0xFF3D8BFF)
     val alpr = Color(0xFFFF4D6D)
     val camera = Color(0xFFC77DFF)
+    val ship = Color(0xFF4DD0E1)
+    val webcam = Color(0xFFFFE066)
+    val fire = Color(0xFFFF3D00)
 
     /** NASA EONET categories. */
     fun event(category: String): Color = when (category) {

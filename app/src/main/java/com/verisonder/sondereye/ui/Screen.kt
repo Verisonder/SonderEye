@@ -60,6 +60,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -79,6 +90,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Hotspot
+import com.verisonder.sondereye.core.Ship
+import com.verisonder.sondereye.core.Webcam
+import com.verisonder.sondereye.data.Keys
 import com.verisonder.sondereye.core.EARTH_R
 import com.verisonder.sondereye.core.Forecast
 import com.verisonder.sondereye.core.Flight
@@ -116,6 +131,7 @@ class Actions(
     val follow: (String?) -> Unit,
     val clearCache: () -> Unit,
     val measureCache: () -> Unit,
+    val saveKeys: (Keys) -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -226,7 +242,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(top = 12.dp, end = 66.dp, start = 12.dp)
             ) {
-                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache)
+                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys)
             }
         }
     }
@@ -302,6 +318,18 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 state.camerasNote ?: "${c.items.count { it.alpr }} plate readers, OpenStreetMap",
             )
         }
+        if (l.ships) {
+            any = true
+            LayerLine(Palette.ship, if (state.shipsNote != null) "Ships" else count(state.ships.size, "ship"), state.shipsNote ?: "live AIS, AISStream")
+        }
+        if (l.webcams) {
+            any = true
+            LayerLine(Palette.webcam, if (state.webcamsNote != null) "Webcams" else count(state.webcams.items.size, "webcam"), state.webcamsNote ?: "near the centre, Windy")
+        }
+        if (l.fires) {
+            any = true
+            LayerLine(Palette.fire, if (state.firesNote != null) "Fires" else count(state.fires.items.size, "fire hotspot"), state.firesNote ?: "last 24 h, NASA FIRMS")
+        }
         state.following?.let { hex ->
             val f = state.flights.items.firstOrNull { it.hex == hex }
             Text(
@@ -321,10 +349,11 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
         state.alertProblem?.let { ErrorLine(it, null) }
+        state.shipsProblem?.let { ErrorLine(it, null) }
         state.meProblem?.let { ErrorLine(it, actions.fixLocation) }
         if (g != null && g.failures > 0) ErrorLine("Imagery: ${g.failures} tiles failed (${g.lastFailure}). Retrying every 20 s.", null)
         state.globeError?.let { ErrorLine(it, null) }
@@ -383,6 +412,9 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfQuake -> QuakeBody(sel.q, now, context, close)
                 is Sel.OfFlight -> FlightBody(sel.f, state, actions, context, close)
                 is Sel.OfCamera -> CameraBody(sel.c, context, close)
+                is Sel.OfShip -> ShipBody(state.ships[sel.s.mmsi] ?: sel.s, now, context, close)
+                is Sel.OfWebcam -> WebcamBody(sel.w, context, close)
+                is Sel.OfFire -> FireBody(sel.h, context, close)
                 is Sel.OfSat -> SatBody(sel.s, state, actions, close)
                 is Sel.OfEvent -> EventBody(sel.e, now, context, close)
                 is Sel.OfPlace -> PlaceBody(sel, state, close)
@@ -427,6 +459,62 @@ private fun ColumnScope.QuakeBody(q: Quake, now: Long, context: Context, onClose
     // USGS sets this flag for large oceanic events. It is not a warning itself.
     if (q.tsunami) Line("Large oceanic event: check tsunami.gov for warnings", Palette.error)
     LinkRow(fullTime(q.timeMs), if (q.url.isNotEmpty()) "Open on USGS" else null) { openUrl(context, q.url) }
+}
+
+@Composable
+private fun ColumnScope.ShipBody(sh: Ship, now: Long, context: Context, onClose: () -> Unit) {
+    Header(null, Palette.ship, sh.name ?: "MMSI ${sh.mmsi}", "MMSI ${sh.mmsi}", onClose)
+    val parts = listOfNotNull(
+        sh.sogKt?.let { "%.1f kn".format(it) },
+        sh.cog?.let { "course ${it.roundToInt()}°" },
+        sh.heading?.let { "heading ${it.roundToInt()}°" },
+    )
+    Line(parts.ifEmpty { listOf("No speed reported") }.joinToString(", "))
+    LinkRow("AISStream, ${Fmt.ago(sh.atMs, now).lowercase()}", "Open on MarineTraffic") {
+        openUrl(context, "https://www.marinetraffic.com/en/ais/details/ships/mmsi:${sh.mmsi}")
+    }
+}
+
+@Composable
+private fun ColumnScope.WebcamBody(w: Webcam, context: Context, onClose: () -> Unit) {
+    Header(null, Palette.webcam, w.title, w.place ?: "", onClose)
+    var img by remember(w.id) { mutableStateOf<ImageBitmap?>(null) }
+    var failed by remember(w.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(w.id) {
+        val url = w.preview ?: run { failed = "No picture for this webcam"; return@LaunchedEffect }
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 15_000; c.readTimeout = 15_000
+                try {
+                    if (c.responseCode != 200) error("HTTP ${c.responseCode}")
+                    android.graphics.BitmapFactory.decodeStream(c.inputStream)?.asImageBitmap() ?: error("not an image")
+                } finally { c.disconnect() }
+            }
+        }
+        r.onSuccess { img = it }.onFailure { failed = "Picture: ${it.message}" }
+    }
+    val bmp = img
+    when {
+        bmp != null -> Image(
+            bmp, contentDescription = w.title, contentScale = ContentScale.Crop,
+            modifier = Modifier.padding(end = 10.dp, top = 6.dp).fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(12.dp))
+                .clickable { w.page?.let { openUrl(context, it) } },
+        )
+        failed != null -> Line(failed!!, Palette.error)
+        else -> Line("Loading the picture…")
+    }
+    LinkRow("From Windy Webcams", if (w.page != null) "Open live" else null) { w.page?.let { openUrl(context, it) } }
+}
+
+@Composable
+private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Unit) {
+    val conf = when (h.confidence) { "h" -> "high confidence"; "n" -> "nominal confidence"; "l" -> "low confidence"; else -> null }
+    Header(null, Palette.fire, "Fire detected by satellite", listOfNotNull(conf, if (h.day) "daytime pass" else "night pass").joinToString(", "), onClose)
+    Line(listOfNotNull(h.frpMw?.let { "intensity %.1f MW".format(it) }, "seen ${h.acquired} UTC").joinToString(", "))
+    LinkRow("NASA FIRMS, VIIRS NOAA-20", "Open FIRMS map") {
+        openUrl(context, "https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@%.4f,%.4f,11.0z".format(java.util.Locale.ROOT, h.lon, h.lat))
+    }
 }
 
 @Composable
@@ -621,7 +709,7 @@ private fun SearchPanel(se: SearchState, actions: Actions) {
 // ---- Layers panel ----------------------------------------------------------------------------
 
 @Composable
-private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, clearCache: () -> Unit) {
+private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, clearCache: () -> Unit, keys: Keys, saveKeys: (Keys) -> Unit) {
     Surface(
         color = Palette.panel,
         shape = RoundedCornerShape(20.dp),
@@ -678,6 +766,18 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, 
             Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
 
             Divider()
+            Section("Ships", "Live AIS from AISStream; loads below 2,000 km", s.ships) { change(s.copy(ships = it)) }
+            KeyField("AISStream key", keys.ais, "aisstream.io → sign in with GitHub → API Keys") { saveKeys(keys.copy(ais = it)) }
+
+            Divider()
+            Section("Webcams", "Windy Webcams near the centre; loads below 1,000 km", s.webcams) { change(s.copy(webcams = it)) }
+            KeyField("Windy key", keys.windy, "api.windy.com → Webcams API → free key") { saveKeys(keys.copy(windy = it)) }
+
+            Divider()
+            Section("Fire hotspots", "Every fire seen by NASA satellites, last 24 h", s.fires) { change(s.copy(fires = it)) }
+            KeyField("FIRMS map key", keys.firms, "firms.modaps.eosdis.nasa.gov/api/map_key → your e-mail") { saveKeys(keys.copy(firms = it)) }
+
+            Divider()
             Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
 
             Divider()
@@ -703,6 +803,31 @@ private fun Section(title: String, sub: String, on: Boolean, toggle: (Boolean) -
             Text(sub, color = Palette.dim, fontSize = 12.sp)
         }
         Switch(checked = on, onCheckedChange = toggle)
+    }
+}
+
+/** A personal key: shown masked once saved, with how to get one. */
+@Composable
+private fun KeyField(label: String, saved: String, how: String, save: (String) -> Unit) {
+    var editing by remember { mutableStateOf(saved.isEmpty()) }
+    var text by remember { mutableStateOf("") }
+    if (!editing) {
+        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("$label: ••••${saved.takeLast(4)}", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = { editing = true; text = "" }) { Text("Change", color = Palette.accent) }
+        }
+        return
+    }
+    Text(how, color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = text, onValueChange = { text = it }, singleLine = true,
+            placeholder = { Text(label, color = Palette.dim) },
+            visualTransformation = PasswordVisualTransformation(),
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = { save(text.trim()); editing = text.isBlank() }, enabled = text.isNotBlank()) { Text("Save", color = Palette.accent) }
     }
 }
 

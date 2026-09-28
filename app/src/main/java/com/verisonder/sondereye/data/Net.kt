@@ -18,13 +18,19 @@ object Net {
 
     /** A form POST (Overpass wants its query in the body). */
     fun <T> post(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
-        request(url, what, source, body, parse)
+        request(url, what, source, body, emptyMap(), parse)
 
     /** [what] names the source in messages ("Earthquakes", "Flights"…). */
     fun <T> get(url: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
-        request(url, what, source, null, parse)
+        request(url, what, source, null, emptyMap(), parse)
 
-    private fun <T> request(url: String, what: String, source: String, body: String?, parse: (String) -> T): Outcome<T> {
+    /** GET with extra request headers (an API key). */
+    fun <T> getWith(url: String, headers: Map<String, String>, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, null, headers, parse)
+
+    private fun <T> request(
+        url: String, what: String, source: String, body: String?, headers: Map<String, String>, parse: (String) -> T,
+    ): Outcome<T> {
         val conn = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (e: IOException) {
@@ -35,6 +41,7 @@ object Net {
             conn.readTimeout = TIMEOUT_MS
             conn.setRequestProperty("Accept", "application/json, text/plain, */*")
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
+            for ((k, v) in headers) conn.setRequestProperty(k, v)
             if (body != null) {
                 conn.requestMethod = "POST"
                 conn.doOutput = true
@@ -43,6 +50,7 @@ object Net {
             }
             val code = conn.responseCode
             if (code == 429) return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)")
+            if (code == 401 || code == 403) return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
             if (code != 200) return Outcome.Failed("$what: $source answered HTTP $code")
             val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             try {

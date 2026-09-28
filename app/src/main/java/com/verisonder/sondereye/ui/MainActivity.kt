@@ -23,7 +23,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.verisonder.sondereye.core.Ais
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Hotspot
+import com.verisonder.sondereye.core.Ship
+import com.verisonder.sondereye.core.Webcam
 import com.verisonder.sondereye.core.EARTH_R
 import com.verisonder.sondereye.core.Forecast
 import com.verisonder.sondereye.core.Motion
@@ -39,7 +43,9 @@ import com.verisonder.sondereye.core.TileSource
 import com.verisonder.sondereye.core.V3
 import com.verisonder.sondereye.core.Weather
 import com.verisonder.sondereye.alerts.PassAlerts
+import com.verisonder.sondereye.data.AisStream
 import com.verisonder.sondereye.data.Feeds
+import com.verisonder.sondereye.data.Keys
 import com.verisonder.sondereye.data.Layers
 import com.verisonder.sondereye.data.MapStyle
 import com.verisonder.sondereye.data.Net
@@ -77,6 +83,9 @@ sealed class Sel(val key: String) {
     class OfEvent(val e: NatEvent) : Sel("e:" + e.id)
     object Me : Sel("me")
     class OfCamera(val c: Camera) : Sel("c:" + c.id)
+    class OfShip(val s: Ship) : Sel("v:" + s.mmsi)
+    class OfWebcam(val w: Webcam) : Sel("w:" + w.id)
+    class OfFire(val h: Hotspot) : Sel("h:%.4f,%.4f".format(java.util.Locale.ROOT, h.lat, h.lon))
     /** A spot picked by a long press, for its weather. */
     class OfPlace(val lat: Double, val lon: Double) : Sel("p:%.4f,%.4f".format(java.util.Locale.ROOT, lat, lon))
 }
@@ -137,6 +146,15 @@ class EyeState {
     var radarFrameAt by mutableStateOf<Long?>(null)
     /** Bytes of map tiles on the phone (shown in the menu). */
     var cacheBytes by mutableStateOf<Long?>(null)
+    var keys by mutableStateOf(Keys())
+    /** Live ships by MMSI; replaced (not mutated) so Compose sees changes. */
+    var ships by mutableStateOf<Map<Long, Ship>>(emptyMap())
+    var shipsNote by mutableStateOf<String?>(null)
+    var shipsProblem by mutableStateOf<String?>(null)
+    val webcams = Feed<Webcam>()
+    var webcamsNote by mutableStateOf<String?>(null)
+    val fires = Feed<Hotspot>()
+    var firesNote by mutableStateOf<String?>(null)
     /** Satellites added by a search, drawn even when their group is not shown. */
     var extraSats by mutableStateOf<List<Sgp4>>(emptyList())
     var layersOpen by mutableStateOf(false)
@@ -179,6 +197,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         store = Settings(this)
         state.layers = store.load()
+        state.keys = store.keys()
         installHttpCache()
         where = Where(
             this,
@@ -215,7 +234,7 @@ class MainActivity : ComponentActivity() {
                 override fun onError(message: String) { state.globeError = message }
             })
             // Fixes the draw order: later layers on top.
-            for (name in listOf("quakes", "events", "cameras", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
+            for (name in listOf("fires", "quakes", "events", "cameras", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
         } else {
             state.globeError = "Globe: this phone reports OpenGL ES ${gl shr 16}.${gl and 0xFFFF}; 3.0 is required"
@@ -249,6 +268,11 @@ class MainActivity : ComponentActivity() {
                         },
                         clearCache = ::clearCache,
                         measureCache = ::measureCache,
+                        saveKeys = { k ->
+                            store.saveKeys(k)
+                            state.keys = store.keys()
+                            closeShips(); loadWebcams(force = true); loadFires(force = true)
+                        },
                     ),
                 )
             }
@@ -290,6 +314,11 @@ class MainActivity : ComponentActivity() {
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
+                        if (l.ships) tickShips(now) else if (shipsOpen) closeShips()
+                        if (l.webcams && !state.webcams.loading && now - state.webcams.attemptAt >= 15_000 && webcamArea.stale(globe?.center())) loadWebcams()
+                        if (l.fires && !state.fires.loading &&
+                            (now - state.fires.attemptAt >= 30 * 60_000L || (now - state.fires.attemptAt >= 15_000 && fireArea.stale(globe?.center())))
+                        ) loadFires()
                         if (l.quakes && l.autoRefresh && !state.quakes.loading && now - state.quakes.attemptAt >= QUAKES_AUTO_MS) loadQuakes()
                         tick++
                         delay(1000)
@@ -316,6 +345,9 @@ class MainActivity : ComponentActivity() {
         ) applyMap()
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
+        if (new.ships != old.ships && !new.ships) closeShips()
+        if (new.webcams != old.webcams) loadWebcams(force = true)
+        if (new.fires != old.fires) loadFires(force = true)
         if (new.radar != old.radar) loadRadar()
         if (new.passAlerts != old.passAlerts) {
             if (new.passAlerts) enablePassAlerts() else {
@@ -438,11 +470,11 @@ class MainActivity : ComponentActivity() {
         jobs[name] = lifecycleScope.launch { block() }
     }
 
-    private fun <T> clear(feed: Feed<T>, layer: String) {
+    private fun <T> clear(feed: Feed<T>, layer: String, prefix: String = "${layer.first()}:") {
         jobs[layer]?.cancel()
         feed.items = emptyList(); feed.loading = false; feed.error = null; feed.updatedAt = null
         globe?.setLayer(layer, emptyList())
-        if (state.selected?.key?.startsWith("${layer.first()}:") == true) select(null)
+        if (state.selected?.key?.startsWith(prefix) == true) select(null)
     }
 
     private fun <T> settle(feed: Feed<T>, out: Net.Outcome<Pair<List<T>, Int>>, layer: String, markers: (List<T>) -> List<Marker>) {
@@ -675,6 +707,144 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ---- Layers that need a personal key --------------------------------------------------
+
+    /** Remembers where a box-shaped layer last loaded, to know when the view has left it. */
+    private class Area {
+        var centre: DoubleArray? = null // lat, lon, radius m
+        fun stale(c: DoubleArray?): Boolean {
+            c ?: return false
+            val last = centre ?: return true
+            val moved = Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000
+            return moved > last[2] * 0.4 || c[2] * 1.5 < last[2] * 0.5 || c[2] * 1.5 > last[2] * 2
+        }
+    }
+
+    /** South, west, north, east around the screen centre, [radiusM] out, at most [maxSpanDeg] across. */
+    private fun box(c: DoubleArray, radiusM: Double, maxSpanDeg: Double): DoubleArray {
+        val dLat = (radiusM / 111_000.0).coerceAtMost(maxSpanDeg / 2)
+        val dLon = (dLat / kotlin.math.cos(Math.toRadians(c[0])).coerceAtLeast(0.1)).coerceAtMost(maxSpanDeg / 2)
+        return doubleArrayOf((c[0] - dLat).coerceAtLeast(-89.0), c[1] - dLon, (c[0] + dLat).coerceAtMost(89.0), c[1] + dLon)
+    }
+
+    // Ships: a live stream for the box around the view.
+    private val ais = AisStream(
+        // Busy waters send hundreds of messages a second: collect here, publish once a second.
+        onMessage = { m ->
+            when (m) {
+                is Ais.Msg.Position -> shipMap[m.ship.mmsi] = m.ship.copy(name = m.ship.name ?: shipMap[m.ship.mmsi]?.name ?: shipNames[m.ship.mmsi])
+                is Ais.Msg.Name -> {
+                    shipNames[m.mmsi] = m.name
+                    shipMap[m.mmsi]?.let { shipMap[m.mmsi] = it.copy(name = m.name) }
+                }
+                else -> {}
+            }
+        },
+        onProblem = { p ->
+            state.shipsProblem = p
+            if (p != null) shipsOpen = false // the ticker reopens after a pause
+        },
+    )
+    private val shipMap = HashMap<Long, Ship>()
+    private val shipNames = HashMap<Long, String>()
+    private var shipsOpen = false
+    private var shipsOpenedAt = 0L
+    private val shipArea = Area()
+
+    private fun closeShips() {
+        ais.close()
+        shipsOpen = false
+        shipArea.centre = null
+        shipMap.clear()
+        state.ships = emptyMap()
+        state.shipsProblem = null
+        state.shipsNote = null
+        globe?.setLayer("ships", emptyList())
+        if (state.selected is Sel.OfShip) select(null)
+    }
+
+    private fun tickShips(now: Long) {
+        val key = state.keys.ais
+        val c = globe?.center() ?: return
+        when {
+            key.isEmpty() -> { state.shipsNote = "add your AISStream key in the menu"; return }
+            c[2] > SHIPS_MAX_ALT -> {
+                state.shipsNote = "zoom in below ${(SHIPS_MAX_ALT / 1000).toInt()} km to load them"
+                if (shipsOpen) { ais.close(); shipsOpen = false; shipArea.centre = null }
+            }
+            (!shipsOpen || shipArea.stale(c)) && now - shipsOpenedAt > 20_000 -> {
+                state.shipsNote = null
+                val r = c[2] * 1.5
+                val b = box(c, r, 12.0)
+                ais.open(key, b[0], b[1], b[2], b[3])
+                shipsOpen = true
+                shipsOpenedAt = now
+                shipArea.centre = doubleArrayOf(c[0], c[1], r)
+            }
+        }
+        // Forget ships silent for 20 minutes; glide the rest along their course.
+        shipMap.values.removeAll { now - it.atMs >= 20 * 60_000L }
+        val fresh = HashMap(shipMap)
+        state.ships = fresh
+        globe?.setLayer("ships", fresh.values.sortedByDescending { it.atMs }.take(4000).map { sh ->
+            val p = if (sh.sogKt != null && sh.sogKt > 0.5 && sh.cog != null)
+                Motion.ahead(sh.lat, sh.lon, sh.cog, sh.sogKt, ((now - sh.atMs) / 1000.0).coerceAtMost(600.0))
+            else doubleArrayOf(sh.lat, sh.lon)
+            Marker("v:" + sh.mmsi, p[0], p[1], 15f * density, Palette.ship.toArgb(),
+                shape = if (sh.bearing != null) Marker.SHAPE_PLANE else Marker.SHAPE_DOT, bearing = sh.bearing ?: Double.NaN)
+        })
+    }
+
+    // Webcams near the screen centre.
+    private val webcamArea = Area()
+
+    private fun loadWebcams(force: Boolean = false) {
+        if (!state.layers.webcams) { state.webcamsNote = null; webcamArea.centre = null; return clear(state.webcams, "webcams") }
+        val key = state.keys.windy
+        if (key.isEmpty()) { state.webcamsNote = "add your Windy key in the menu"; return }
+        val c = globe?.center() ?: return
+        state.webcams.attemptAt = System.currentTimeMillis()
+        if (c[2] > WEBCAMS_MAX_ALT) { state.webcamsNote = "zoom in below ${(WEBCAMS_MAX_ALT / 1000).toInt()} km to load them"; webcamArea.centre = null; return }
+        state.webcamsNote = null
+        if (force) webcamArea.centre = null
+        val radiusKm = (c[2] * 1.5 / 1000).toInt().coerceIn(5, 250)
+        state.webcams.loading = true
+        run("webcams") {
+            val out = withContext(Dispatchers.IO) { Feeds.webcams(key, c[0], c[1], radiusKm) }
+            if (out is Net.Outcome.Ok) webcamArea.centre = doubleArrayOf(c[0], c[1], radiusKm * 1000.0 / 1.5 * 1.5)
+            settle(state.webcams, map(out) { it to 0 }, "webcams") { list ->
+                list.map { Marker("w:" + it.id, it.lat, it.lon, 13f * density, Palette.webcam.toArgb(), shape = Marker.SHAPE_SAT) }
+            }
+        }
+    }
+
+    // Fire hotspots (last 24 h) in the box around the view.
+    private val fireArea = Area()
+
+    private fun loadFires(force: Boolean = false) {
+        if (!state.layers.fires) { state.firesNote = null; fireArea.centre = null; return clear(state.fires, "fires", "h:") }
+        val key = state.keys.firms
+        if (key.isEmpty()) { state.firesNote = "add your NASA FIRMS key in the menu"; return }
+        val c = globe?.center() ?: return
+        state.fires.attemptAt = System.currentTimeMillis()
+        if (c[2] > FIRES_MAX_ALT) { state.firesNote = "zoom in below ${(FIRES_MAX_ALT / 1000).toInt()} km to load them"; fireArea.centre = null; return }
+        state.firesNote = null
+        if (force) fireArea.centre = null
+        val r = c[2] * 1.5
+        val b = box(c, r, 30.0)
+        state.fires.loading = true
+        run("fires") {
+            val out = withContext(Dispatchers.IO) { Feeds.fires(key, b[1], b[0], b[3], b[2]) }
+            if (out is Net.Outcome.Ok) fireArea.centre = doubleArrayOf(c[0], c[1], r)
+            settle(state.fires, map(out) { it to 0 }, "fires") { list ->
+                list.map { h ->
+                    val size = (7.0 + kotlin.math.sqrt(h.frpMw ?: 1.0) * 1.6).coerceIn(7.0, 20.0).toFloat() * density
+                    Marker(Sel.OfFire(h).key, h.lat, h.lon, size, Palette.fire.toArgb())
+                }
+            }
+        }
+    }
+
     // ---- Search ---------------------------------------------------------------------------
 
     /** Places (OpenStreetMap), flights by callsign (adsb.lol) and satellites by name (CelesTrak). */
@@ -792,6 +962,9 @@ class MainActivity : ComponentActivity() {
         key.startsWith("f:") -> state.flights.items.firstOrNull { "f:" + it.hex == key }?.let { Sel.OfFlight(it) }
         key.startsWith("s:") -> (state.sats.items + state.extraSats).firstOrNull { "s:" + it.tle.norad == key }?.let { Sel.OfSat(it) }
         key.startsWith("c:") -> state.cameras.items.firstOrNull { "c:" + it.id == key }?.let { Sel.OfCamera(it) }
+        key.startsWith("v:") -> key.drop(2).toLongOrNull()?.let { state.ships[it] }?.let { Sel.OfShip(it) }
+        key.startsWith("w:") -> state.webcams.items.firstOrNull { "w:" + it.id == key }?.let { Sel.OfWebcam(it) }
+        key.startsWith("h:") -> state.fires.items.firstOrNull { Sel.OfFire(it).key == key }?.let { Sel.OfFire(it) }
         key.startsWith("e:") -> state.events.items.firstOrNull { "e:" + it.id == key }?.let { Sel.OfEvent(it) }
         else -> null
     }
@@ -887,6 +1060,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        ais.close()
         globe?.release()
         HttpResponseCache.getInstalled()?.flush()
         super.onDestroy()
@@ -900,6 +1074,10 @@ class MainActivity : ComponentActivity() {
         private const val RADAR_MS = 10 * 60_000L
         /** The last hour, looped. */
         private const val RADAR_FRAMES = 6
+        /** Live AIS for a box: kept to a region so the phone is not flooded. */
+        private const val SHIPS_MAX_ALT = 2_000_000.0
+        private const val WEBCAMS_MAX_ALT = 1_000_000.0
+        private const val FIRES_MAX_ALT = 6_000_000.0
         /** Overpass boxes stay small: cameras load only below this height. */
         private const val CAMERAS_MAX_ALT = 60_000.0
         /** Camera height when flying to you: a city and its surroundings. */

@@ -25,9 +25,12 @@ Test builds only.
   so the globe appears at once, even offline. Closer tiles are kept on disk (up to 500 MB).
 - Every failure is shown on screen.
 
+- **Ships** (live AIS), **webcams** and **fire hotspots**: each needs a free personal key, pasted in the
+  app's menu and kept on the phone only.
+
 ## Roadmap
 
-- Ships and webcams (these sources need a free key).
+- Tilted view toward the horizon, and terrain in 3D.
 
 ## Data sources
 
@@ -44,6 +47,9 @@ Test builds only.
 | Weather | [Open-Meteo](https://open-meteo.com) | None |
 | Night lights | NASA GIBS, VIIRS City Lights 2012 | None |
 | Place search | [Nominatim](https://nominatim.org), OpenStreetMap | None |
+| Ships | [AISStream](https://aisstream.io) live AIS over WebSocket | Free, GitHub sign-in |
+| Webcams | [Windy Webcams API](https://api.windy.com/webcams) | Free |
+| Fire hotspots | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov), VIIRS NOAA-20, last 24 h | Free, e-mail |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
 

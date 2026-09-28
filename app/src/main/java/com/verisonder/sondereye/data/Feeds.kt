@@ -2,7 +2,9 @@ package com.verisonder.sondereye.data
 
 import com.verisonder.sondereye.core.Adsb
 import com.verisonder.sondereye.core.Eonet
+import com.verisonder.sondereye.core.Firms
 import com.verisonder.sondereye.core.ForecastApi
+import com.verisonder.sondereye.core.Windy
 import com.verisonder.sondereye.core.Lookup
 import com.verisonder.sondereye.core.MinMag
 import com.verisonder.sondereye.core.Nominatim
@@ -37,6 +39,12 @@ object Feeds {
     fun callsign(cs: String) = Net.get(Lookup.callsignUrl(cs), "Search", "adsb.lol", Adsb::parse)
 
     fun satellitesNamed(q: String) = Net.get(Lookup.satelliteUrl(q), "Search", "CelesTrak") { Tle.parseAll(it) }
+
+    fun webcams(key: String, lat: Double, lon: Double, radiusKm: Int) =
+        Net.getWith(Windy.url(lat, lon, radiusKm), mapOf("x-windy-api-key" to key.trim()), "Webcams", "Windy", Windy::parse)
+
+    fun fires(key: String, w: Double, s: Double, e: Double, n: Double) =
+        Net.get(Firms.url(key, w, s, e, n), "Fires", "NASA FIRMS", Firms::parse)
 
     fun cameras(s: Double, w: Double, n: Double, e: Double) =
         Net.post(Overpass.URL, Overpass.cameraQuery(s, w, n, e), "Cameras", "OpenStreetMap Overpass", Overpass::parseCameras)
