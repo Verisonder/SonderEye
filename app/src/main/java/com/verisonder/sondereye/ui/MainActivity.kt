@@ -457,9 +457,10 @@ class MainActivity : ComponentActivity() {
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
-                        if (roadsWanted() && !roadsLoading && now - roadsAttemptAt >= 15_000 && roadsStale()) loadRoads()
+                        if (roadsWanted() && !roadsLoading && (state.roadsProblem == null || now - roadsAttemptAt >= 15_000) && roadsStale()) loadRoads()
                         if (l.busLines) {
-                            if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busLinesStale()) loadBusLines()
+                            // Straight away when the view needs them; the 15 s pause is only for retrying a failure.
+                            if (!state.busLines.loading && (state.busLines.error == null || now - state.busLines.attemptAt >= 15_000) && busLinesStale()) loadBusLines()
                             showBusStops()
                         }
                         if (l.conflicts && !state.conflicts.loading && now - state.conflicts.attemptAt >= CONFLICTS_MS) loadConflicts()
@@ -1070,12 +1071,11 @@ class MainActivity : ComponentActivity() {
 
     // ---- Bus lines (OpenStreetMap) -------------------------------------------------------
 
-    private val busArea = Area()
 
     private fun loadBusLines(force: Boolean = false) {
         if (!state.layers.busLines) {
             state.busLinesNote = null
-            busArea.centre = null
+            busCell = null
             state.busStops = emptyList()
             stopsShown = false
             globe?.setLayer("busStops", emptyList())
@@ -1087,22 +1087,29 @@ class MainActivity : ComponentActivity() {
         }
         val c = globe?.center() ?: return
         state.busLines.attemptAt = System.currentTimeMillis()
-        if (force) busArea.centre = null
+        if (force) busCell = null
         if (c[2] > BUS_LINES_MAX_ALT) {
             state.busLinesNote = "zoom in below ${(BUS_LINES_MAX_ALT / 1000).toInt()} km to load them"
-            busArea.centre = null
             return
         }
         state.busLinesNote = null
-        val r = (c[2] * 1.6).coerceIn(3_000.0, 25_000.0) // metres around the centre; a city at most
-        val b = box(c, r, 1.0)
+        // A fixed square of the map (so the same city gives the same square every time), kept
+        // on the phone for a week: the second time, a city's lines show at once.
+        val cell = busCellOf(c[0], c[1])
+        val b = busCellBox(cell)
+        val file = java.io.File(cacheDir, "buslines/$cell.json")
         state.busLines.loading = true
         run("busLines") {
-            val out = withContext(Dispatchers.IO) { Feeds.busLines(b[0], b[1], b[2], b[3]) }
+            val out = withContext(Dispatchers.IO) {
+                val saved = if (file.exists() && System.currentTimeMillis() - file.lastModified() < BUS_CACHE_MS) {
+                    runCatching { com.verisonder.sondereye.core.BusLines.parse(file.readText()) }.getOrNull()
+                } else null
+                if (saved != null) Net.Outcome.Ok(saved) else Feeds.busLines(b[0], b[1], b[2], b[3], saveTo = file)
+            }
             state.busLines.loading = false
             when (out) {
                 is Net.Outcome.Ok -> {
-                    busArea.centre = doubleArrayOf(c[0], c[1], r)
+                    busCell = cell
                     state.busLines.items = out.value.lines.sortedBy { it.short.padStart(6, '0') } // L2 before L10
                     state.busStops = out.value.stops
                     state.busLines.updatedAt = System.currentTimeMillis()
@@ -1123,10 +1130,20 @@ class MainActivity : ComponentActivity() {
      */
     private fun busLinesStale(): Boolean {
         val c = globe?.center() ?: return false
-        val last = busArea.centre ?: return true
-        val moved = Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000
-        val want = (c[2] * 1.6).coerceIn(3_000.0, 25_000.0)
-        return moved > last[2] * 0.5 || want > last[2] * 1.25
+        if (c[2] > BUS_LINES_MAX_ALT) return busCell == null && state.busLinesNote == null
+        return busCellOf(c[0], c[1]) != busCell
+    }
+
+    private var busCell: String? = null
+
+    private fun busCellOf(lat: Double, lon: Double) =
+        "${kotlin.math.floor(lat / BUS_CELL_DEG).toInt()}_${kotlin.math.floor(lon / BUS_CELL_DEG).toInt()}"
+
+    /** The square with a margin round it, so a view near its edge still has its routes. */
+    private fun busCellBox(cell: String): DoubleArray {
+        val (y, x) = cell.split('_').map { it.toInt() }
+        return doubleArrayOf(y * BUS_CELL_DEG - BUS_CELL_MARGIN, x * BUS_CELL_DEG - BUS_CELL_MARGIN,
+            (y + 1) * BUS_CELL_DEG + BUS_CELL_MARGIN, (x + 1) * BUS_CELL_DEG + BUS_CELL_MARGIN)
     }
 
     /** The routes on the globe; the selected one bright, the rest quieter while one is selected. */
@@ -1752,6 +1769,10 @@ class MainActivity : ComponentActivity() {
         private const val ROADS_VECTOR_ALT = 3_500.0
         private const val ROAD_LIFT_M = 2.0
         private const val BUS_LINES_MAX_ALT = 40_000.0
+        /** Bus routes load by squares of the map this size (degrees), plus a margin, kept a week. */
+        private const val BUS_CELL_DEG = 0.25
+        private const val BUS_CELL_MARGIN = 0.05
+        private const val BUS_CACHE_MS = 7 * 24 * 3_600_000L
         /** The globe starts its fly-in under the start-up screen and lands after it fades. */
         private const val BOOT_FLY_DELAY_MS = 1_100L
         private const val BOOT_FLY_MS = 2_300L

@@ -126,8 +126,11 @@ object Feeds {
     fun roads(s: Double, w: Double, n: Double, e: Double) =
         overpass(com.verisonder.sondereye.core.OsmRoads.query(s, w, n, e), "Roads", slow = true, parse = com.verisonder.sondereye.core.OsmRoads::parse)
 
-    fun busLines(s: Double, w: Double, n: Double, e: Double) =
-        overpass(BusLines.query(s, w, n, e), "Bus lines", slow = true, parse = BusLines::parse)
+    /** Bus routes in the box; the answer is also saved to [saveTo] once it reads correctly. */
+    fun busLines(s: Double, w: Double, n: Double, e: Double, saveTo: java.io.File? = null) =
+        overpass(BusLines.query(s, w, n, e), "Bus lines", slow = true, parse = { t ->
+            BusLines.parse(t).also { saveTo?.let { f -> runCatching { f.parentFile?.mkdirs(); f.writeText(t) } } }
+        })
 
     /** Realtime feeds of the operators serving the point. */
     fun busFeeds(key: String, lat: Double, lon: Double, radiusM: Int) =
