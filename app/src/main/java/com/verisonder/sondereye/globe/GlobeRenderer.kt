@@ -263,7 +263,7 @@ class GlobeRenderer(
                             val pt = SourcedTile(src, p)
                             if (!textures.containsKey(pt) && pt !in absent) loader.request(pt)
                         }
-                    }
+                    } else if (requestNearest(src, want.key)) loading++
                     found = loadedAncestor(src, want.key)
                 }
                 if (pass == 0 && found?.key != want.key) {
@@ -317,6 +317,26 @@ class GlobeRenderer(
     }
 
     /** Nearest ancestor of [k] whose texture is loaded, for [src]. */
+    /**
+     * [k] has nothing (404). Asks for the nearest ancestor that may, to be stretched over it:
+     * reference layers (roads, names) stop several zooms before the imagery does, and without
+     * this only the direct parent was ever asked, so zooming past both left the layer empty.
+     * True when a download was started.
+     */
+    private fun requestNearest(src: TileSource, k: TileKey): Boolean {
+        var a = k.parent()
+        while (a != null) {
+            val t = SourcedTile(src, a)
+            if (textures.containsKey(t)) return false // already here: loadedAncestor draws it
+            if (t !in absent) {
+                loader.request(t)
+                return true
+            }
+            a = a.parent()
+        }
+        return false
+    }
+
     private fun loadedAncestor(src: TileSource, k: TileKey): SourcedTile? {
         var a = k.parent()
         while (a != null) {
@@ -699,7 +719,10 @@ out vec2 vUv;
 out vec3 vNormal;
 void main() {
     vUv = aUv * uUv.x + uUv.yz;
-    vNormal = uCenter + aPos; // only its direction is used: float is plenty
+    // Normalised here, in high precision: positions are millions of metres, past what the
+    // fragment shader's mediump float holds (65,504 on most phones). Unnormalised, the value
+    // overflowed and the night side became a fixed half of the globe instead of following the Sun.
+    vNormal = normalize(uCenter + aPos);
     gl_Position = uMvp * vec4(aPos, 1.0);
 }"""
 
@@ -719,7 +742,7 @@ out vec4 outColor;
 void main() {
     vec4 c = uHasTex > 0.5 ? texture(uTex, vUv) : vec4(uColor, 1.0);
     // 0 on the night side, 1 in daylight, with a twilight band across the terminator.
-    float day = smoothstep(-0.10, 0.08, dot(normalize(vNormal), uSun));
+    float day = smoothstep(-0.10, 0.08, dot(normalize(vNormal), uSun)); // re-normalised: interpolation shortens it
     if (uMode > 0.5) {
         float glow = max(c.r, max(c.g, c.b));
         outColor = vec4(c.rgb * vec3(1.0, 0.92, 0.75), glow * (1.0 - day) * uAlpha);

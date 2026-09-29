@@ -23,6 +23,18 @@ class SkyTest {
         assertEquals(1.0, d / 1.495978707e11, 0.02)
     }
 
+    @Test fun sunMovesWestThroughTheMorning() {
+        // 29 Sep 2026: subsolar point at 06:41 and 08:00 UTC (reference: 77.3°E and 57.6°E, -2.4°).
+        val a = Geo.latLon(Astro.sun(ms("2026-09-29T06:41:00Z")))
+        assertEquals(-2.44, a[0], 0.1)
+        assertEquals(77.3, a[1], 0.3)
+        val b = Geo.latLon(Astro.sun(ms("2026-09-29T08:00:00Z")))
+        assertEquals(57.6, b[1], 0.3)
+        // Morocco is on GMT since 20 Sep 2026: 06:41 there is after sunrise (about 06:16).
+        assertTrue(Astro.sunElevation(35.77, -5.8, ms("2026-09-29T06:41:00Z")) > 2.0)
+        assertTrue(Astro.sunElevation(35.77, -5.8, ms("2026-09-29T05:41:00Z")) < -5.0)
+    }
+
     @Test fun dayAndNightInTangier() {
         assertTrue(Astro.sunElevation(35.77, -5.8, ms("2026-09-28T13:00:00Z")) > 40.0)
         assertTrue(Astro.sunElevation(35.77, -5.8, ms("2026-09-28T23:00:00Z")) < -30.0)
