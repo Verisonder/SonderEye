@@ -25,6 +25,8 @@ class Marker(
         const val SHAPE_PLANE = 1
         const val SHAPE_SAT = 2
         const val SHAPE_ME = 3
+        /** A bus stop sign: a rounded square in the colour, a white bus on it. */
+        const val SHAPE_BUS = 4
     }
 }
 

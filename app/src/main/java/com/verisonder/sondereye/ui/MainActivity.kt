@@ -1250,9 +1250,10 @@ class MainActivity : ComponentActivity() {
         globe?.setLayer("busStops", when {
             !want -> emptyList()
             picked != null -> state.busStops.filter { it.id in picked.stopIds }.map { s ->
-                Marker("bs:" + s.id, s.lat, s.lon, 12f * density, 0xFF000000.toInt() or picked.shown)
+                Marker("bs:" + s.id, s.lat, s.lon, 20f * density, 0xFF000000.toInt() or picked.shown, shape = Marker.SHAPE_BUS)
             }
-            else -> state.busStops.map { s -> Marker("bs:" + s.id, s.lat, s.lon, 9f * density, Palette.busStop.toArgb()) }
+            // A bus on a blue sign, like the stops in the street (a picked line's stops take its colour).
+            else -> state.busStops.map { s -> Marker("bs:" + s.id, s.lat, s.lon, 16f * density, BUS_STOP_BLUE, shape = Marker.SHAPE_BUS) }
         })
     }
 
@@ -1905,6 +1906,7 @@ class MainActivity : ComponentActivity() {
         private const val BUS_STOPS_MAX_ALT = 12_000.0
         private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it
         private const val BUS_FLY_ALT = 8_000.0
+        private const val BUS_STOP_BLUE = 0xFF1E6FD9.toInt()
         /** Height the map follows a ride from: the street and the next stops in view. */
         private const val RIDE_ALT = 1_500.0
         /** Low enough for the area's own fires and webcams to load. */

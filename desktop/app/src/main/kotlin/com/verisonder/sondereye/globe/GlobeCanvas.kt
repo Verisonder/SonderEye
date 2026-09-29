@@ -7,7 +7,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -396,6 +398,18 @@ internal fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String
                     moveTo(c.x, c.y - q); lineTo(c.x + q, c.y); lineTo(c.x, c.y + q); lineTo(c.x - q, c.y); close()
                 }
                 drawPath(d2, color)
+            }
+            Marker.SHAPE_BUS -> {
+                // Rounded square sign, dark rim, and a white bus seen from the front.
+                val s = r
+                drawRoundRect(DARK, Offset(c.x - s, c.y - s), Size(2 * s, 2 * s), CornerRadius(s * 0.4f))
+                drawRoundRect(color, Offset(c.x - s * 0.84f, c.y - s * 0.84f), Size(1.68f * s, 1.68f * s), CornerRadius(s * 0.3f))
+                drawRoundRect(Color.White, Offset(c.x - 0.42f * s, c.y - 0.54f * s), Size(0.84f * s, 0.98f * s), CornerRadius(0.12f * s))
+                drawRect(Color.White, Offset(c.x - 0.36f * s, c.y + 0.44f * s), Size(0.18f * s, 0.18f * s))
+                drawRect(Color.White, Offset(c.x + 0.18f * s, c.y + 0.44f * s), Size(0.18f * s, 0.18f * s))
+                drawRect(color, Offset(c.x - 0.30f * s, c.y - 0.42f * s), Size(0.60f * s, 0.34f * s))
+                drawCircle(color, 0.07f * s, Offset(c.x - 0.26f * s, c.y + 0.23f * s))
+                drawCircle(color, 0.07f * s, Offset(c.x + 0.26f * s, c.y + 0.23f * s))
             }
             Marker.SHAPE_ME -> {
                 drawCircle(color.copy(alpha = 0.22f), r, c)

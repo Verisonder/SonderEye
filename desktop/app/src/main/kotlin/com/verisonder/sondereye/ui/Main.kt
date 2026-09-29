@@ -80,6 +80,20 @@ private fun window() = application {
                     else -> false
                 }
             },
+            // Not "preview": a text box being typed in gets these keys first and keeps them.
+            onKeyEvent = { e ->
+                val down = e.type == KeyEventType.KeyDown
+                if (e.type != KeyEventType.KeyDown && e.type != KeyEventType.KeyUp) return@Window false
+                when (e.key) {
+                    Key.W, Key.DirectionUp -> { controller.keyMove(0, -1, down); true }
+                    Key.S, Key.DirectionDown -> { controller.keyMove(0, 1, down); true }
+                    Key.A, Key.DirectionLeft -> { controller.keyMove(-1, 0, down); true }
+                    Key.D, Key.DirectionRight -> { controller.keyMove(1, 0, down); true }
+                    Key.E -> { if (down) controller.keyNearest(); true }
+                    Key.Enter, Key.NumPadEnter -> { if (down) controller.keyOpen(); true }
+                    else -> false
+                }
+            },
         ) {
             val base = LocalDensity.current
             BoxWithConstraints(Modifier.fillMaxSize()) {

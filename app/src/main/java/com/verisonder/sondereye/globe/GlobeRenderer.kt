@@ -42,6 +42,8 @@ class Marker(
         const val SHAPE_PLANE = 1
         const val SHAPE_SAT = 2
         const val SHAPE_ME = 3
+        /** A bus stop sign: a rounded square in the colour, a white bus on it. */
+        const val SHAPE_BUS = 4
     }
 }
 
@@ -1002,6 +1004,22 @@ void main() {
         float d = abs(c.x) + abs(c.y);
         if (d > 1.0) discard;
         outColor = d > 0.72 ? vec4(DARK, 0.9) : vec4(vColor, 1.0);
+        return;
+    }
+
+    if (vShape == 4) {
+        // Rounded square sign, dark rim, and a white bus seen from the front.
+        vec2 q = abs(c) - vec2(0.70);
+        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - 0.26;
+        if (d > 0.0) discard;
+        if (d > -0.14) { outColor = vec4(DARK, 0.9); return; }
+        bool glass = abs(c.x) < 0.30 && c.y > 0.08 && c.y < 0.42;
+        bool lamp = c.y > -0.30 && c.y < -0.16 && abs(abs(c.x) - 0.26) < 0.07;
+        bool body = abs(c.x) < 0.42 && c.y > -0.44 && c.y < 0.54;
+        bool wheel = c.y <= -0.44 && c.y > -0.62 && abs(abs(c.x) - 0.27) < 0.09;
+        if (glass || lamp) { outColor = vec4(vColor, 1.0); return; }
+        if (body || wheel) { outColor = vec4(1.0); return; }
+        outColor = vec4(vColor, 1.0);
         return;
     }
 

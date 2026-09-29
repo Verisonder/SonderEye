@@ -256,7 +256,7 @@ class GlobeView(cacheDir: File, val density: Float, private val listener: Listen
         return if (a != null && b != null) Geo.toDeg(Geo.angle(a, b)) / 20.0 else 90.0 / v.earthRadiusPx()
     }
 
-    private fun panByPixels(dx: Double, dy: Double) {
+    internal fun panByPixels(dx: Double, dy: Double) {
         val v = view()
         val dpp = degreesPerPixel(v)
         val h = Geo.toRad(cam.heading)
@@ -284,6 +284,72 @@ class GlobeView(cacheDir: File, val density: Float, private val listener: Listen
         setCam(cam.copy(heading = cam.heading + degrees))
     }
 
+    // ---- Keyboard ------------------------------------------------------------------------------
+
+    private var keyX = 0
+    private var keyY = 0
+    private var keyMover: Job? = null
+    /** The point E last picked (ringed, not yet opened). */
+    private var focusKey: String? = null
+
+    /**
+     * W A S D held: the map moves that way (the view goes up for W), smoothly, until let go.
+     * [dx], [dy] are -1, 0 or 1 for this key; [down] whether it is pressed.
+     */
+    fun keyMove(dx: Int, dy: Int, down: Boolean) {
+        if (dx != 0) keyX = if (down) dx else if (keyX == dx) 0 else keyX
+        if (dy != 0) keyY = if (down) dy else if (keyY == dy) 0 else keyY
+        if (keyX == 0 && keyY == 0) {
+            keyMover?.cancel(); keyMover = null
+            return
+        }
+        if (keyMover != null) return
+        stopAnimation()
+        listener.onUserGesture()
+        keyMover = scope.launch {
+            var last = System.nanoTime()
+            while (isActive && (keyX != 0 || keyY != 0)) {
+                delay(16)
+                val now = System.nanoTime()
+                val dt = ((now - last) / 1e9).coerceAtMost(0.05)
+                last = now
+                // Half a screen a second, whatever the height.
+                val speed = maxOf(width, height) * 0.5 * dt
+                panByPixels(-keyX * speed, -keyY * speed)
+            }
+            keyMover = null
+        }
+    }
+
+    /**
+     * E: rings the point nearest the middle of the screen and centres on it; E again moves
+     * on to the next nearest. Enter opens it ([openFocused]).
+     */
+    fun focusNearest() {
+        val v = view()
+        val cx = v.width / 2.0
+        val cy = v.height / 2.0
+        val seen = all.mapNotNull { m ->
+            if (!visible(v, m.pos)) return@mapNotNull null
+            val s = v.project(m.pos) ?: return@mapNotNull null
+            if (s[0] < 0 || s[1] < 0 || s[0] > v.width || s[1] > v.height) return@mapNotNull null
+            m to ((s[0] - cx) * (s[0] - cx) + (s[1] - cy) * (s[1] - cy))
+        }.sortedBy { it.second }
+        if (seen.isEmpty()) return
+        // Centred on the last one already: the next nearest after it.
+        val next = seen.firstOrNull { it.first.key != focusKey } ?: return
+        focusKey = next.first.key
+        selectedKey = focusKey
+        flyTo(cam.copy(lat = next.first.lat, lon = next.first.lon), ms = 300)
+    }
+
+    /** Enter: opens the point E picked (or the one ringed), as a click would. */
+    fun openFocused() {
+        val key = focusKey ?: selectedKey ?: return
+        listener.onTap(key)
+        focusKey = null
+    }
+
     // ---- Mouse (from GlobeCanvas) ----------------------------------------------------------
 
     internal fun pressed() {
@@ -294,6 +360,7 @@ class GlobeView(cacheDir: File, val density: Float, private val listener: Listen
     internal fun moved() = listener.onUserGesture()
 
     internal fun click(x: Float, y: Float) {
+        focusKey = null
         val i = Pick.nearest(view(), markerLat, markerLon, x.toDouble(), y.toDouble(), 16.0 * density, markerAlt)
         val key = all.getOrNull(i)?.key
         listener.onTap(key)
