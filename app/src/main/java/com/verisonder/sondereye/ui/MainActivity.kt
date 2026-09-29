@@ -157,6 +157,8 @@ class EyeState {
     var firesNote by mutableStateOf<String?>(null)
     /** Satellites added by a search, drawn even when their group is not shown. */
     var extraSats by mutableStateOf<List<Sgp4>>(emptyList())
+    /** Screen centre and camera, for the position readout: lat, lon, alt, heading. */
+    var view by mutableStateOf<DoubleArray?>(null)
     var layersOpen by mutableStateOf(false)
     /** Wall clock for moving things, ticking once a second while the app is on screen. */
     var clock by mutableLongStateOf(System.currentTimeMillis())
@@ -280,6 +282,17 @@ class MainActivity : ComponentActivity() {
 
         refreshAll()
         if (state.layers.passAlerts) schedulePassAlerts()
+
+        // Position readout: four times a second, and only when it changed.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    val c = globe?.center()
+                    if (c != null && !c.contentEquals(state.view)) state.view = c
+                    delay(250)
+                }
+            }
+        }
 
         // Radar animation: the past hour's frames in a loop, holding on the latest.
         lifecycleScope.launch {

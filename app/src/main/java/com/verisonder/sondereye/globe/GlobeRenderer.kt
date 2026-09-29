@@ -183,7 +183,15 @@ class GlobeRenderer(
         GLES30.glDisable(GLES30.GL_CULL_FACE)
         GLES30.glDisable(GLES30.GL_BLEND)
 
-        val tiles = TileSelect.select(view, MAX_ZOOM, SPLIT_PX, TILE_LIMIT)
+        // Farthest from the screen centre first: downloads are last-in-first-out, so the
+        // tiles you are looking at are fetched first.
+        val cx = width / 2.0
+        val cy = height / 2.0
+        val tiles = TileSelect.select(view, MAX_ZOOM, SPLIT_PX, TILE_LIMIT).sortedByDescending { k ->
+            view.project(k.center())?.let { (it[0] - cx) * (it[0] - cx) + (it[1] - cy) * (it[1] - cy) } ?: Double.MAX_VALUE
+        }
+        /** Tiles whose own base imagery has arrived: overlays wait for these. */
+        val baseReady = HashSet<TileKey>()
         var loading = 0
         GLES30.glUseProgram(tileProg)
         val uMvp = GLES30.glGetUniformLocation(tileProg, "uMvp")
@@ -221,9 +229,16 @@ class GlobeRenderer(
             for (k in tiles) {
                 val want = SourcedTile(src, src.keyFor(k))
                 var found: SourcedTile? = null
+                // Roads, labels and radar only download once the picture under them has:
+                // the photo is what you are waiting for.
+                val mayRequest = pass == 0 || k in baseReady || src.night
                 if (textures.containsKey(want)) {
                     found = want
+                    if (pass == 0) baseReady.add(k)
+                } else if (!mayRequest) {
+                    found = loadedAncestor(src, want.key)
                 } else {
+                    if (pass == 0 && want in absent) baseReady.add(k) // nothing finer exists here
                     if (want !in absent) {
                         loading++
                         loader.request(want)
@@ -588,7 +603,11 @@ class GlobeRenderer(
 
     companion object {
         const val MAX_ZOOM = 20
-        private const val SPLIT_PX = 384.0 // 256 px images shown at no more than 1.5×
+        /**
+         * A tile splits when it would cover more than this many screen pixels. 448 keeps
+         * imagery sharp on a ~450 dpi screen while needing about a third fewer tiles than 384.
+         */
+        private const val SPLIT_PX = 448.0
         private const val TILE_LIMIT = 180
         private const val TEXTURE_CAP = 300 // up to ~70 MB of GPU memory, which phones share with RAM
         private const val MESH_CAP = 400

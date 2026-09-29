@@ -116,8 +116,8 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         requestRender()
     }
 
-    /** [lat, lon, alt] of the point under the screen centre and the camera height. */
-    fun center(): DoubleArray = cam.let { doubleArrayOf(it.lat, it.lon, it.alt) }
+    /** [lat, lon, alt, heading] of the point under the screen centre, the camera height and heading. */
+    fun center(): DoubleArray = cam.let { doubleArrayOf(it.lat, it.lon, it.alt, it.heading) }
 
     fun home() = flyTo(CameraState.HOME)
 

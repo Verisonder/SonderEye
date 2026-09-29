@@ -6,6 +6,17 @@ import android.net.Uri
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -164,56 +175,70 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             )
         }
 
-        // Required by the map providers. Sits under the card when one is open.
-        Text(
-            state.credits.joinToString("  ·  "),
-            color = Palette.dim.copy(alpha = 0.8f),
-            fontSize = 10.sp,
-            modifier = Modifier
+        Reticle(Modifier.align(Alignment.Center))
+
+        // Bottom left: where the screen centre is, and the credits the map providers require.
+        Column(
+            Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-                .padding(start = 12.dp, bottom = 4.dp),
+                .padding(start = 14.dp, end = 80.dp, bottom = 6.dp),
+        ) {
+            state.view?.let { v -> Text(position(v), color = Palette.text.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
+            Text(state.credits.joinToString("  ·  "), color = Palette.dim.copy(alpha = 0.7f), fontSize = 9.sp, maxLines = 2)
+        }
+
+        // Top left: the heads-up display. Compact; tap it for the details.
+        Hud(
+            state, actions,
+            Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(start = 12.dp, top = 12.dp, end = 72.dp)
+                .widthIn(max = 400.dp),
         )
 
-        Row(
+        // Right: the controls.
+        Column(
             Modifier
-                .fillMaxWidth()
+                .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(12.dp),
-            verticalAlignment = Alignment.Top,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            StatusCard(state, actions, Modifier.weight(1f))
-            Spacer(Modifier.width(10.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RoundButton(Icons.Default.Menu, "Layers") {
-                    state.layersOpen = !state.layersOpen
-                    if (state.layersOpen) actions.measureCache()
-                }
-                RoundButton(Icons.Default.Search, "Search") { state.search.open = !state.search.open }
-                val busy = state.quakes.loading || state.events.loading || state.sats.loading ||
-                    (state.flights.loading && state.flights.updatedAt == null)
-                if (busy) {
-                    Box(
-                        Modifier.size(44.dp).background(Palette.panel, CircleShape).border(1.dp, Palette.line, CircleShape),
-                        Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = Palette.accent, strokeWidth = 2.dp)
-                    }
-                } else {
-                    RoundButton(Icons.Default.Refresh, "Refresh", onClick = actions.refresh)
-                }
-                RoundButton(Icons.Default.LocationOn, "Where I am", tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
-                RoundButton(Icons.Default.Star, "Sky view", onClick = actions.sky)
-                RoundButton(Icons.Default.Home, "Whole Earth", onClick = actions.home)
+            RoundButton(Icons.Default.Menu, "Layers", active = state.layersOpen) {
+                state.layersOpen = !state.layersOpen
+                state.search.open = false
+                if (state.layersOpen) actions.measureCache()
             }
+            RoundButton(Icons.Default.Search, "Search", active = state.search.open) {
+                state.search.open = !state.search.open
+                state.layersOpen = false
+            }
+            val busy = state.quakes.loading || state.events.loading || state.sats.loading ||
+                (state.flights.loading && state.flights.updatedAt == null)
+            if (busy) {
+                Box(
+                    Modifier.size(44.dp).background(Palette.panel, CircleShape).border(1.dp, Palette.line, CircleShape),
+                    Alignment.Center,
+                ) {
+                    CircularProgressIndicator(Modifier.size(20.dp), color = Palette.accent, strokeWidth = 2.dp)
+                }
+            } else {
+                RoundButton(Icons.Default.Refresh, "Refresh", onClick = actions.refresh)
+            }
+            RoundButton(Icons.Default.LocationOn, "Where I am", tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+            RoundButton(Icons.Default.Star, "Sky view", onClick = actions.sky)
+            RoundButton(Icons.Default.Home, "Whole Earth", onClick = actions.home)
         }
 
         AnimatedVisibility(
             visible = state.selected != null,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-                .padding(12.dp),
+                .padding(12.dp)
+                .widthIn(max = 460.dp), // a card, not a wall, when the phone is sideways
             enter = slideInVertically { it } + fadeIn(),
             exit = slideOutVertically { it } + fadeOut(),
         ) {
@@ -228,7 +253,8 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Modifier
                     .align(Alignment.TopStart)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp, end = 66.dp, start = 12.dp)
+                    .padding(top = 12.dp, end = 72.dp, start = 12.dp)
+                .widthIn(max = 420.dp)
             ) {
                 SearchPanel(state.search, actions)
             }
@@ -240,7 +266,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Modifier
                     .align(Alignment.TopEnd)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp, end = 66.dp, start = 12.dp)
+                    .padding(top = 12.dp, end = 72.dp, start = 12.dp)
             ) {
                 LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys)
             }
@@ -253,13 +279,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
 @Composable
 private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
     val l = state.layers
-    Column(
-        modifier
-            .background(Palette.panel, PanelShape)
-            .border(1.dp, Palette.line, PanelShape)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         var any = false
         if (l.quakes) {
             any = true
@@ -360,6 +380,123 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
     }
 }
 
+/** Compact: name, live clock, one chip per layer. Tap for the full status and every error. */
+@Composable
+private fun Hud(state: EyeState, actions: Actions, modifier: Modifier) {
+    var open by remember { mutableStateOf(false) }
+    val errors = listOfNotNull(
+        state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
+        state.cameras.error, state.webcams.error, state.fires.error, state.meProblem, state.alertProblem,
+        state.shipsProblem, state.globeError,
+    ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier
+            .background(Palette.panel, shape)
+            .border(1.dp, (if (errors > 0) Palette.error else Palette.accent).copy(alpha = 0.35f), shape)
+            .clickable { open = !open }
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .animateContentSize(),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LiveDot()
+            Spacer(Modifier.width(7.dp))
+            Text("SONDEREYE", color = Palette.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.weight(1f))
+            Text(utc(state.clock), color = Palette.dim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        }
+        Row(
+            Modifier.padding(top = 7.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val l = state.layers
+            fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
+            if (l.quakes) Chip(Palette.shallow, n(state.quakes), "QUAKES")
+            if (l.flights) Chip(Palette.flight, n(state.flights), "FLIGHTS")
+            if (l.satellites || state.extraSats.isNotEmpty()) Chip(Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "SATS")
+            if (l.ships) Chip(Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "SHIPS")
+            if (l.events) Chip(Palette.event("wildfires"), n(state.events), "EVENTS")
+            if (l.fires) Chip(Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "FIRES")
+            if (l.cameras) Chip(Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "CAMS")
+            if (l.webcams) Chip(Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "WEBCAMS")
+            if (l.radar) Chip(Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "RADAR")
+            val g = state.globeStatus
+            if (g != null && g.loading > 0 && g.failures == 0) Chip(Palette.dim, "↓${g.loading}", "TILES")
+            if (errors > 0) Chip(Palette.error, "⚠ $errors", if (errors == 1) "ALERT" else "ALERTS")
+        }
+        state.following?.let { hex ->
+            val f = state.flights.items.firstOrNull { it.hex == hex }
+            Text(
+                "◎ FOLLOWING ${f?.callsign ?: hex.uppercase()} · TAP TO STOP",
+                color = Palette.accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(top = 6.dp).clickable { actions.follow(null) },
+            )
+        }
+        if (open) {
+            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = Palette.line)
+            StatusCard(state, actions, Modifier)
+        }
+    }
+}
+
+@Composable
+private fun Chip(color: Color, value: String, label: String) {
+    Row(
+        Modifier
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(6.dp).background(color, CircleShape))
+        Spacer(Modifier.width(5.dp))
+        Text(value, color = Palette.text, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Spacer(Modifier.width(4.dp))
+        Text(label, color = Palette.dim, fontSize = 10.sp, letterSpacing = 1.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+/** The red "live" light, breathing. */
+@Composable
+private fun LiveDot() {
+    val t = rememberInfiniteTransition(label = "live")
+    val a by t.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "live-alpha")
+    Box(Modifier.size(8.dp).background(Palette.error.copy(alpha = a), CircleShape))
+}
+
+/** Thin crosshair on the screen centre: what the position readout refers to. */
+@Composable
+private fun Reticle(modifier: Modifier) {
+    Canvas(modifier.size(34.dp)) {
+        val c = Offset(size.width / 2, size.height / 2)
+        val col = Color.White.copy(alpha = 0.55f)
+        val w = 1.2.dp.toPx()
+        val gap = 5.dp.toPx()
+        val arm = size.width / 2
+        drawLine(col, Offset(c.x - arm, c.y), Offset(c.x - gap, c.y), w)
+        drawLine(col, Offset(c.x + gap, c.y), Offset(c.x + arm, c.y), w)
+        drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y - gap), w)
+        drawLine(col, Offset(c.x, c.y + gap), Offset(c.x, c.y + arm), w)
+        drawCircle(col, radius = 1.6.dp.toPx(), center = c)
+        drawCircle(col.copy(alpha = 0.25f), radius = arm - 1f, center = c, style = Stroke(w))
+    }
+}
+
+private fun utc(ms: Long): String {
+    val s = (ms / 1000) % 86_400
+    return "%02d:%02d:%02d UTC".format(s / 3600, (s / 60) % 60, s % 60)
+}
+
+/** "35.7672°N 5.7997°W · ALT 25.0 km · HDG 000°" */
+private fun position(v: DoubleArray): String {
+    val lat = "%.4f°%s".format(Locale.ROOT, kotlin.math.abs(v[0]), if (v[0] >= 0) "N" else "S")
+    val lon = "%.4f°%s".format(Locale.ROOT, kotlin.math.abs(v[1]), if (v[1] >= 0) "E" else "W")
+    val alt = v[2].let { if (it < 10_000) "%.0f m".format(Locale.ROOT, it) else if (it < 1_000_000) "%.1f km".format(Locale.ROOT, it / 1000) else "%,d km".format(Locale.ROOT, (it / 1000).toLong()) }
+    val hdg = "%03d°".format(Locale.ROOT, v.getOrElse(3) { 0.0 }.roundToInt() % 360)
+    return "$lat  $lon  ·  ALT $alt  ·  HDG $hdg"
+}
+
 @Composable
 private fun LayerLine(dot: Color, title: String, detail: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -384,12 +521,12 @@ private fun ErrorLine(text: String, onClick: (() -> Unit)?) {
 }
 
 @Composable
-private fun RoundButton(icon: ImageVector, label: String, tint: Color = Palette.text, onClick: () -> Unit) {
+private fun RoundButton(icon: ImageVector, label: String, tint: Color = Palette.text, active: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier
             .size(44.dp)
-            .background(Palette.panel, CircleShape)
-            .border(1.dp, Palette.line, CircleShape),
+            .background(if (active) Palette.accent.copy(alpha = 0.22f) else Palette.panel, CircleShape)
+            .border(1.dp, if (active) Palette.accent else Palette.line, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         IconButton(onClick = onClick) { Icon(icon, contentDescription = label, tint = tint) }
@@ -689,7 +826,8 @@ private fun SearchPanel(se: SearchState, actions: Actions) {
             if (!se.busy && se.searched && se.hits.isEmpty() && se.errors.isEmpty()) {
                 Text("Nothing found.", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
             }
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            val maxH = (LocalConfiguration.current.screenHeightDp - 220).coerceIn(120, 420)
+            Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState())) {
                 for (h in se.hits) {
                     Column(
                         Modifier
@@ -715,7 +853,9 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, 
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier.widthIn(max = 340.dp).border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
     ) {
-        Column(Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
+        // Fits the screen in both orientations, scrolling inside.
+        val maxH = (LocalConfiguration.current.screenHeightDp - 110).coerceAtLeast(200)
+        Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
             Section("Earthquakes", "USGS, updated every minute", s.quakes) { change(s.copy(quakes = it)) }
             Column(Modifier.alpha(if (s.quakes) 1f else 0.4f)) {
                 Label("Minimum magnitude")
