@@ -22,13 +22,10 @@
             android:fillColor="#5CF28E"
             android:fillAlpha="0.3"
             android:pathData="M256,256 L256,152 A104,104 0 0,1 346,204 Z" />
-        <!-- The S: two half range-rings meeting at the scope's centre. -->
-        <path
-            android:strokeColor="#7DF5A5"
-            android:strokeWidth="18"
-            android:strokeLineCap="round"
-            android:fillColor="#00000000"
-            android:pathData="M256,166 A45,45 0 0,0 256,256 A45,45 0 0,1 256,346" />
-        <path android:fillColor="#7DF5A5" android:pathData="M318,186 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+        <!-- The S, in Audiowide (SIL OFL 1.1). Font units, placed like the logo. -->
+        <group android:translateX="185.74" android:translateY="318.00" android:scaleX="0.08647" android:scaleY="-0.08647">
+            <path android:fillColor="#7DF5A5" android:pathData="M1529 422Q1529 345 1509.5 283.5Q1490 222 1458.0 175.0Q1426 128 1383.0 95.0Q1340 62 1294.0 41.0Q1248 20 1200.5 10.0Q1153 0 1111 0H108V260H1111Q1186 260 1227.5 304.0Q1269 348 1269 422Q1269 458 1258.0 488.0Q1247 518 1226.5 540.0Q1206 562 1176.5 574.0Q1147 586 1111 586H513Q450 586 377.0 608.5Q304 631 241.5 681.0Q179 731 137.5 812.0Q96 893 96 1010Q96 1127 137.5 1207.5Q179 1288 241.5 1338.5Q304 1389 377.0 1411.5Q450 1434 513 1434H1398V1174H513Q439 1174 397.5 1129.0Q356 1084 356 1010Q356 935 397.5 891.5Q439 848 513 848H1111H1113Q1155 847 1202.0 836.5Q1249 826 1295.5 804.0Q1342 782 1384.0 748.5Q1426 715 1458.5 668.0Q1491 621 1510.0 560.0Q1529 499 1529 422Z" />
+        </group>
+        <path android:fillColor="#7DF5A5" android:pathData="M287.5,169.5 m-11,0 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0" />
     </group>
 </vector>
