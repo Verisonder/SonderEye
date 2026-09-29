@@ -52,6 +52,8 @@ data class Layers(
     val busLines: Boolean = false,
     /** Live bus positions, where the operator publishes them (through Transitland). */
     val buses: Boolean = false,
+    /** Places the news reports fighting in (GDELT). */
+    val conflicts: Boolean = false,
     /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
     val credits: Boolean = true,
     /** White chart-paper panels instead of dark ones. */
@@ -94,6 +96,7 @@ class Settings(context: Context) {
             fires = prefs.getBoolean("fires.enabled", d.fires),
             busLines = prefs.getBoolean("busLines.enabled", d.busLines),
             buses = prefs.getBoolean("buses.enabled", d.buses),
+            conflicts = prefs.getBoolean("conflicts.enabled", d.conflicts),
             credits = prefs.getBoolean("map.credits", d.credits),
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
@@ -126,6 +129,7 @@ class Settings(context: Context) {
             .putBoolean("fires.enabled", s.fires)
             .putBoolean("busLines.enabled", s.busLines)
             .putBoolean("buses.enabled", s.buses)
+            .putBoolean("conflicts.enabled", s.conflicts)
             .putBoolean("map.credits", s.credits)
             .putBoolean("ui.lightPanels", s.lightPanels)
             .putBoolean("ui.northLock", s.northLock)

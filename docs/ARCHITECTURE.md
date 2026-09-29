@@ -10,6 +10,7 @@ app/src/main/java/com/verisonder/sondereye/
     Sgp4.kt     TLE parsing, SGP4 near-Earth propagation, sidereal time, look angles, passes.
     Tiles.kt    Map tile sources (base and overlays), radar index, Open-Meteo weather.
     Astro.kt    Sun and Moon positions, Earth's shadow, sky-view projection.
+    Conflicts.kt  Places in armed-conflict news (GDELT GEO 2.0) and their stories.
     Transit.kt  Bus lines and stops (Overpass), live buses: Transitland lookups, GTFS Realtime
                 as JSON and as protocol buffer (a small reader for the fields a map needs).
   alerts/

@@ -65,6 +65,8 @@ object Palette {
     /** Buses, and bus lines that have no colour of their own in OpenStreetMap. */
     val bus = Color(0xFFFF9F43)
     val busStop = Color(0xFFF2F5F8)
+    /** Places in the news for fighting. */
+    val conflict = Color(0xFFFF1744)
 
     /** NASA EONET categories. */
     fun event(category: String): Color = when (category) {

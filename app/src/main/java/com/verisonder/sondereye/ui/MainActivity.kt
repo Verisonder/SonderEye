@@ -28,6 +28,7 @@ import com.verisonder.sondereye.core.Bus
 import com.verisonder.sondereye.core.BusLine
 import com.verisonder.sondereye.core.BusStop
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Conflict
 import com.verisonder.sondereye.core.RtFeed
 import com.verisonder.sondereye.core.Firms
 import com.verisonder.sondereye.core.Hotspot
@@ -97,6 +98,7 @@ sealed class Sel(val key: String) {
     class OfShip(val s: Ship) : Sel("v:" + s.mmsi)
     class OfWebcam(val w: Webcam) : Sel("w:" + w.id)
     class OfFire(val h: Hotspot) : Sel("h:%.4f,%.4f".format(java.util.Locale.ROOT, h.lat, h.lon))
+    class OfConflict(val c: Conflict) : Sel(c.key)
     class OfBusStop(val s: BusStop) : Sel("bs:" + s.id)
     class OfBusLine(val l: BusLine) : Sel("bl:" + l.id)
     class OfBus(val b: Bus) : Sel("bv:" + b.key)
@@ -205,6 +207,8 @@ class EyeState {
     var firesNote by mutableStateOf<String?>(null)
     /** Showing the strongest fires worldwide (from high up), not all of them around the view. */
     var firesWorld by mutableStateOf(false)
+    /** Places in the news for fighting, last 24 h (GDELT). */
+    val conflicts = Feed<Conflict>()
     /** Bus lines (one per direction) and their stops, OpenStreetMap. */
     val busLines = Feed<BusLine>()
     var busStops by mutableStateOf<List<BusStop>>(emptyList())
@@ -300,7 +304,7 @@ class MainActivity : ComponentActivity() {
                 override fun onError(message: String) { state.globeError = message }
             })
             // Fixes the draw order: later layers on top.
-            for (name in listOf("fires", "quakes", "events", "cameras", "busStops", "buses", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
+            for (name in listOf("fires", "quakes", "conflicts", "events", "cameras", "busStops", "buses", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
             globe?.northLocked = state.layers.northLock
         } else {
@@ -436,6 +440,7 @@ class MainActivity : ComponentActivity() {
                             if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busArea.stale(globe?.center())) loadBusLines()
                             showBusStops()
                         }
+                        if (l.conflicts && !state.conflicts.loading && now - state.conflicts.attemptAt >= CONFLICTS_MS) loadConflicts()
                         if (l.buses && !state.buses.loading && now - state.buses.attemptAt >= maxOf(BUSES_MS, busesBackoffS * 1000L)) loadBuses()
                         if (l.ships) tickShips(now) else if (shipsOpen) closeShips()
                         if (l.webcams && !state.webcams.loading && now - state.webcams.attemptAt >= 15_000 && webcamArea.stale(globe?.center())) loadWebcams()
@@ -470,6 +475,7 @@ class MainActivity : ComponentActivity() {
         if (new.cameras != old.cameras) loadCameras()
         if (new.busLines != old.busLines) loadBusLines(force = true)
         if (new.buses != old.buses) loadBuses(force = true)
+        if (new.conflicts != old.conflicts) loadConflicts()
         Palette.dark = !new.lightPanels
         if (new.northLock != old.northLock) globe?.northLocked = new.northLock
         if (new.credits != old.credits || new.cameras != old.cameras || new.busLines != old.busLines) applyMap()
@@ -502,6 +508,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshAll() {
         loadQuakes(); loadFlights(); loadSatellites(); loadEvents(); loadRadar()
+        if (state.layers.conflicts) loadConflicts()
         val w = state.weather
         if (w != null) state.selected?.let { loadWeather(it) }
     }
@@ -962,6 +969,24 @@ class MainActivity : ComponentActivity() {
             settle(state.cameras, map(out) { it to 0 }, "cameras") { list ->
                 list.map { cam ->
                     Marker("c:" + cam.id, cam.lat, cam.lon, 11f * density, (if (cam.alpr) Palette.alpr else Palette.camera).toArgb())
+                }
+            }
+        }
+    }
+
+    // ---- Conflicts (GDELT) ----------------------------------------------------------------
+
+    private fun loadConflicts() {
+        if (!state.layers.conflicts) return clear(state.conflicts, "conflicts", "x:")
+        state.conflicts.loading = true
+        state.conflicts.attemptAt = System.currentTimeMillis()
+        run("conflicts") {
+            val out = withContext(Dispatchers.IO) { Feeds.conflicts() }
+            settle(state.conflicts, map(out) { it to 0 }, "conflicts") { list ->
+                list.map { c ->
+                    // Bigger where more of the news is about it.
+                    val size = (8.0 + 3.0 * kotlin.math.ln(c.count.coerceAtLeast(1).toDouble()) / kotlin.math.ln(2.0)).coerceIn(8.0, 22.0)
+                    Marker(c.key, c.lat, c.lon, size.toFloat() * density, Palette.conflict.toArgb())
                 }
             }
         }
@@ -1451,6 +1476,7 @@ class MainActivity : ComponentActivity() {
         key.startsWith("w:") -> state.webcams.items.firstOrNull { "w:" + it.id == key }?.let { Sel.OfWebcam(it) }
         key.startsWith("h:") -> state.fires.items.firstOrNull { Sel.OfFire(it).key == key }?.let { Sel.OfFire(it) }
         key.startsWith("e:") -> state.events.items.firstOrNull { "e:" + it.id == key }?.let { Sel.OfEvent(it) }
+        key.startsWith("x:") -> state.conflicts.items.firstOrNull { it.key == key }?.let { Sel.OfConflict(it) }
         key.startsWith("bs:") -> state.busStops.firstOrNull { "bs:" + it.id == key }?.let { Sel.OfBusStop(it) }
         key.startsWith("bl:") -> state.busLines.items.firstOrNull { "bl:" + it.id == key }?.let { Sel.OfBusLine(it) }
         key.startsWith("bv:") -> state.buses.items.firstOrNull { "bv:" + it.key == key }?.let { Sel.OfBus(it) }
@@ -1576,6 +1602,8 @@ class MainActivity : ComponentActivity() {
         private const val BUS_FLY_ALT = 8_000.0
         private const val BUSES_MAX_ALT = 300_000.0
         private const val BUSES_MS = 30_000L
+        /** GDELT updates every 15 minutes. */
+        private const val CONFLICTS_MS = 15 * 60_000L
         private const val BUSES_MAX = 3_000
         private const val BUS_FEEDS_RADIUS_M = 10_000
         private const val BUS_FEEDS_MOVE_M = 30_000.0

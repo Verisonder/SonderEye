@@ -121,6 +121,7 @@ import com.verisonder.sondereye.core.Bus
 import com.verisonder.sondereye.core.BusLine
 import com.verisonder.sondereye.core.BusStop
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Conflict
 import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.Ship
 import com.verisonder.sondereye.core.Webcam
@@ -491,6 +492,16 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 onOpen = { actions.openList("cameras") },
             )
         }
+        if (l.conflicts) {
+            any = true
+            val c = state.conflicts
+            LayerLine(
+                Palette.conflict,
+                if (c.loading && c.updatedAt == null) "Loading conflicts…" else count(c.items.size, "place in conflict news", "places in conflict news"),
+                "last 24 h, GDELT",
+                onOpen = { actions.openList("conflicts") },
+            )
+        }
         if (l.busLines) {
             any = true
             val b = state.busLines
@@ -542,7 +553,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
         state.alertProblem?.let { ErrorLine(it, null) }
@@ -563,7 +574,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     val problems = listOfNotNull(
         state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
-        state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.meProblem, state.alertProblem,
+        state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.meProblem, state.alertProblem,
         state.shipsProblem, state.globeError,
     ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
     val shape = RoundedCornerShape(2.dp)
@@ -589,6 +600,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
                 if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
                 if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
+                if (l.conflicts) Key(Sym.DOT, Palette.conflict, n(state.conflicts), "conflicts") { actions.openList("conflicts") }
                 if (l.busLines) Key(Sym.DOT, Palette.bus, if (state.busLinesNote != null) "–" else n(state.busLines), "bus lines") { actions.openList("busLines") }
                 if (l.buses) Key(Sym.PLANE, Palette.bus, if (state.busesNote != null) "–" else n(state.buses), "buses") { actions.openList("buses") }
                 if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
@@ -987,6 +999,7 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfShip -> ShipBody(state.ships[sel.s.mmsi] ?: sel.s, now, context, close)
                 is Sel.OfWebcam -> WebcamBody(sel.w, context, close)
                 is Sel.OfFire -> FireBody(sel.h, context, close)
+                is Sel.OfConflict -> ConflictBody(sel.c, context, close)
                 is Sel.OfBusStop -> BusStopBody(sel.s, state, actions, close)
                 is Sel.OfBusLine -> BusLineBody(sel.l, state, context, close)
                 is Sel.OfBus -> BusBody(sel.b, state, close)
@@ -1092,6 +1105,22 @@ private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Un
     LinkRow("NASA FIRMS, VIIRS NOAA-20", "Open FIRMS map") {
         openUrl(context, "https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@%.4f,%.4f,11.0z".format(java.util.Locale.ROOT, h.lon, h.lat))
     }
+}
+
+@Composable
+private fun ColumnScope.ConflictBody(c: Conflict, context: Context, onClose: () -> Unit) {
+    Header(null, Palette.conflict, c.name, if (c.count == 1) "1 article about fighting, last 24 h" else "${c.count} articles about fighting, last 24 h", onClose, Sym.DOT)
+    // The stories themselves: what the pin is based on.
+    for (a in c.articles.take(5)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { openUrl(context, a.url) }.padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(a.title, color = Palette.text, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text("›", color = Palette.signal, fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp, end = 10.dp))
+        }
+    }
+    Line("Named in news tagged as armed conflict by GDELT. What the news says, not a verified event.")
 }
 
 @Composable
@@ -1329,6 +1358,10 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
             ListRow(Sel.OfCamera(c), Sym.DOT, if (c.alpr) Palette.alpr else Palette.camera, if (c.alpr) "Licence-plate reader" else "Surveillance camera",
                 listOfNotNull(c.operator, c.direction?.let { "facing ${Sky.compass(it)}" }).joinToString(", ").ifEmpty { "No details mapped" },
                 if (c.alpr) 1.0 else 0.0, 0.0)
+        })
+        "conflicts" -> Triple("Places in conflict news", "Most reported" to "Name", state.conflicts.items.map { c ->
+            ListRow(Sel.OfConflict(c), Sym.DOT, Palette.conflict, c.name, count(c.count, "article"),
+                c.count.toDouble(), -(c.name.firstOrNull()?.code ?: 0).toDouble())
         })
         "busLines" -> Triple("Bus lines", "Number" to "Stops", state.busLines.items.mapIndexed { i, l ->
             ListRow(Sel.OfBusLine(l), Sym.DOT, l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus, "Line ${l.short}",
@@ -1675,6 +1708,9 @@ private fun LayersPanel(
 
             Divider()
             Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
+
+            Divider()
+            Section("Conflicts", "Places the news reports fighting in, last 24 h (GDELT)", s.conflicts) { change(s.copy(conflicts = it)) }
 
             Divider()
             Section("Bus lines", "Routes and stops from OpenStreetMap; load below 40 km", s.busLines) { change(s.copy(busLines = it)) }

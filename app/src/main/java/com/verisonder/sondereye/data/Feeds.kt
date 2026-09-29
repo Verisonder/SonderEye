@@ -89,6 +89,8 @@ object Feeds {
         return Net.Outcome.Ok(all.distinctBy { it.id })
     }
 
+    fun conflicts() = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT", com.verisonder.sondereye.core.Gdelt::parse)
+
     fun busLines(s: Double, w: Double, n: Double, e: Double) =
         Net.post(Overpass.URL, BusLines.query(s, w, n, e), "Bus lines", "OpenStreetMap Overpass", BusLines::parse)
 

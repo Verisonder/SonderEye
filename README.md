@@ -23,6 +23,7 @@ not a web page in a wrapper.
   the one you pick and its next passes over you. GPS and geostationary orbits included.
 - Ships (AISStream), fire hotspots (NASA FIRMS) and public webcams (Windy), each with your own free key.
 - Natural events (NASA EONET): wildfires, volcanoes, storms, ice.
+- Conflicts: places the world's news reports fighting in, last 24 hours (GDELT), with the stories.
 - Rain radar (RainViewer), optionally looping the past hour.
 - Surveillance cameras and licence-plate readers mapped in OpenStreetMap.
 - Bus lines and stops mapped in OpenStreetMap, and live buses wherever the operator
@@ -67,6 +68,7 @@ not a web page in a wrapper.
 | News | Publisher RSS/Atom feeds (12 built in, or your own) | None |
 | Written brief | [Google Gemini API](https://aistudio.google.com/apikey), optional | Free tier |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
+| Conflicts | [GDELT](https://www.gdeltproject.org) GEO 2.0, armed-conflict theme, last 24 h | None |
 | Bus lines and stops | OpenStreetMap via the Overpass API | None |
 | Live buses | Operators' GTFS Realtime feeds, found and relayed by [Transitland](https://www.transit.land) | Free |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
