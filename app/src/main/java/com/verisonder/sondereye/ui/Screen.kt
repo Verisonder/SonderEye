@@ -253,11 +253,12 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(12.dp)
                 .heightIn(max = stripMax.dp)
-                .background(Palette.panel, RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp)) // nothing inside may poke past the corners
+                .background(Palette.panel)
                 .border(1.dp, Palette.line, RoundedCornerShape(14.dp))
                 .verticalScroll(rememberScrollState()),
         ) {
-            Tool(Icons.Default.KeyboardArrowRight, "Hide the controls", false) {
+            Tool(Icons.Default.KeyboardArrowRight, "Hide the controls (the tab on the right brings them back)", false) {
                 state.layersOpen = false
                 state.search.open = false
                 state.brief.open = false
@@ -268,16 +269,21 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             val heading = state.view?.getOrNull(3) ?: 0.0
             val locked = state.layers.northLock
             val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+            val context = LocalContext.current
             Box(
                 Modifier
                     .size(48.dp)
-                    .background(if (locked) Palette.magenta else Color.Transparent)
+                    .padding(6.dp)
+                    .background(if (locked) Palette.magenta else Color.Transparent, RoundedCornerShape(10.dp))
                     .pointerInput(locked) {
                         detectTapGestures(
                             onTap = { actions.northUp() },
                             onLongPress = {
                                 haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 actions.change(state.layers.copy(northLock = !locked))
+                                android.widget.Toast.makeText(
+                                    context, if (locked) "North unlocked" else "North locked: the map stays north up", android.widget.Toast.LENGTH_SHORT,
+                                ).show()
                             },
                         )
                     },
@@ -318,7 +324,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             ToolDivider()
             Tool(Icons.Default.LocationOn, "Where I am", false, tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
             ToolDivider()
-            Tool(Icons.Default.Star, "Sky view", false, onClick = actions.sky)
+            Tool(SkyIcon, "Sky view: point the phone at the sky", false, onClick = actions.sky)
             ToolDivider()
             Tool(Icons.Default.Home, "Whole Earth", false, onClick = actions.home)
         }
@@ -674,13 +680,31 @@ private fun ScaleBar(v: DoubleArray) {
     }
 }
 
+/** A crescent moon: the sky view. (The built-in set has no fitting icon; a star reads as "favourite".) */
+private val SkyIcon: ImageVector by lazy {
+    ImageVector.Builder("sky", 24.dp, 24.dp, 24f, 24f).addPath(
+        pathData = androidx.compose.ui.graphics.vector.addPathNodes(
+            "M12.3,2.5 A9.5,9.5 0 1,0 21.5,14.2 A7.6,7.6 0 0,1 12.3,2.5 Z M18.5,3.2 L19.1,4.9 L20.8,5.5 L19.1,6.1 L18.5,7.8 L17.9,6.1 L16.2,5.5 L17.9,4.9 Z",
+        ),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.Black),
+    ).build()
+}
+
+/** A key on the tool strip. Long-press says what it does. */
 @Composable
 private fun Tool(icon: ImageVector, label: String, active: Boolean, tint: Color = Palette.text, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val tap by androidx.compose.runtime.rememberUpdatedState(onClick) // the gesture outlives recompositions
     Box(
         Modifier
             .size(48.dp)
             .background(if (active) Palette.magenta.copy(alpha = 0.12f) else Color.Transparent)
-            .clickable(onClick = onClick),
+            .pointerInput(label) {
+                detectTapGestures(
+                    onTap = { tap() },
+                    onLongPress = { android.widget.Toast.makeText(context, label, android.widget.Toast.LENGTH_SHORT).show() },
+                )
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = label, tint = if (active) Palette.magenta else tint, modifier = Modifier.size(22.dp))
