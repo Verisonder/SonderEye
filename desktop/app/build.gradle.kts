@@ -18,7 +18,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
 }
 
-val appVersion = "1.0.0"
+val appVersion = "1.0.1"
 
 compose.desktop {
     application {
