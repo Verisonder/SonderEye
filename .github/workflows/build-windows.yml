@@ -8,6 +8,12 @@ on:
       - 'test/windows'
     tags:
       - 'v*'
+  # Builds from a branch and adds the Windows files to an existing release (named here).
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release tag to add the Windows files to, e.g. v1.0.0'
+        required: true
 
 permissions:
   contents: write
@@ -100,7 +106,7 @@ jobs:
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
 
       - name: Publish (test build)
-        if: startsWith(github.ref, 'refs/heads/')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,17 +118,18 @@ jobs:
             --notes "Test build from $GITHUB_REF_NAME at $GITHUB_SHA"
 
       - name: Publish (release)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
         run: |
           # The Android release job creates the release; wait for it, then add the Windows files.
+          TAG="${{ inputs.release || github.ref_name }}"
           for i in $(seq 1 60); do
-            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
             sleep 20
           done
-          gh release upload "$GITHUB_REF_NAME" "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" \
+          gh release upload "$TAG" "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Report the failure
