@@ -602,10 +602,10 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     ) {
         val l = state.layers
         fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
-        // The keys, and top right a small button that opens the details under them.
+        // The keys, and top right the key that tucks the legend away.
         Box {
             FlowRow(
-                Modifier.padding(end = 60.dp), // room for the two keys
+                Modifier.padding(end = 30.dp), // room for the hide key
                 horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
@@ -621,18 +621,8 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
                 if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
             }
-            // Top right: open the details, and tuck the legend away to the left edge.
-            Row(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp)) {
-                Box(Modifier.size(30.dp).clickable { open = !open }, Alignment.Center) {
-                    Icon(
-                        if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (open) "Hide the details" else "Show the details",
-                        tint = Palette.signal, modifier = Modifier.size(24.dp),
-                    )
-                }
-                Box(Modifier.size(30.dp).clickable { state.legendHidden = true }, Alignment.Center) {
-                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Hide the legend", tint = Palette.signal, modifier = Modifier.size(24.dp))
-                }
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).size(30.dp).clickable { state.legendHidden = true }, Alignment.Center) {
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Hide the legend", tint = Palette.signal, modifier = Modifier.size(24.dp))
             }
         }
         val g = state.globeStatus
@@ -658,6 +648,17 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         if (open) {
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = Palette.line)
             StatusCard(state, actions, Modifier)
+        }
+        // Bottom edge: opens the details above it, and closes them again.
+        Box(
+            Modifier.fillMaxWidth().padding(top = 2.dp).height(22.dp).offset(y = 6.dp).clickable { open = !open },
+            Alignment.Center,
+        ) {
+            Icon(
+                if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = if (open) "Hide the details" else "Show the details",
+                tint = Palette.signal, modifier = Modifier.size(24.dp),
+            )
         }
     }
 }
