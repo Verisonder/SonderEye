@@ -538,7 +538,7 @@ class MainActivity : ComponentActivity() {
         }
         val overlays = ArrayList<TileSource>()
         // Streets already draws its own roads and names.
-        if (l.map != MapStyle.STREETS && l.roads) overlays.add(TileSource.ROADS)
+        if (l.map != MapStyle.STREETS && l.roads) { overlays.add(TileSource.ROADS); overlays.add(TileSource.ROAD_NAMES) }
         if (l.map != MapStyle.STREETS && l.labels) overlays.add(TileSource.LABELS)
         if (l.dayNight && l.lights) overlays.add(0, TileSource.LIGHTS)
         val r = state.radar.items

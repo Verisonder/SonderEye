@@ -244,6 +244,7 @@ class GlobeRenderer(
             // Only the picture itself goes dark at night; roads, names and radar stay readable.
             GLES30.glUniform1f(uShade, if (shading && pass == 0) 1f else 0f)
             for (k in tiles) {
+                if (k.z < src.minZoom) continue
                 val want = SourcedTile(src, src.keyFor(k))
                 var found: SourcedTile? = null
                 // Roads, labels and radar only download once the picture under them has:

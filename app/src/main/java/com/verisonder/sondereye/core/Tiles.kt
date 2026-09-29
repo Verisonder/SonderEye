@@ -22,6 +22,8 @@ class TileSource(
      * empty place: treated like a 404, so the level above is stretched over it.
      */
     val emptyIsMissing: Boolean = false,
+    /** Not drawn on tiles shallower than this (another source covers those zooms). */
+    val minZoom: Int = 0,
     private val template: (z: Int, x: Int, y: Int) -> String,
 ) {
     fun url(k: TileKey) = template(k.z, k.x, k.y)
@@ -34,6 +36,9 @@ class TileSource(
     }
 
     companion object {
+        /** The deepest zoom at which Esri still draws road lines. */
+        const val ROAD_LINES_MAX_Z = 15
+
         private fun esri(service: String): (Int, Int, Int) -> String = { z, x, y ->
             // Two hostnames for the same service: twice the parallel downloads.
             val host = if ((x + y) % 2 == 0) "server" else "services"
@@ -66,7 +71,14 @@ class TileSource(
             "https://gibs-" + "abc"[(x + y) % 3] + ".earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/$z/$y/$x.jpg"
         }
 
-        val ROADS = TileSource("esri-roads", 19, true, "Roads: Esri", emptyIsMissing = true, template = esri("Reference/World_Transportation"))
+        /**
+         * Esri's roads layer stops drawing the road lines past zoom 15 and keeps only their
+         * names ("at the largest scales, the line symbols are hidden"). So the lines are
+         * taken from zoom 15 and stretched when closer, and the names come from the same
+         * layer at full depth, from zoom 16 on.
+         */
+        val ROADS = TileSource("esri-roads", ROAD_LINES_MAX_Z, true, "Roads: Esri", emptyIsMissing = true, template = esri("Reference/World_Transportation"))
+        val ROAD_NAMES = TileSource("esri-road-names", 19, true, "Roads: Esri", minZoom = ROAD_LINES_MAX_Z + 1, template = esri("Reference/World_Transportation"))
         val LABELS = TileSource("esri-labels", 19, true, "Labels: Esri", template = esri("Reference/World_Boundaries_and_Places"))
 
         /** RainViewer radar, past 10-minute frame. [path] comes from their weather-maps.json. */
