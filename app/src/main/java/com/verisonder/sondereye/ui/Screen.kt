@@ -568,7 +568,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.roadsProblem)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
         state.alertProblem?.let { ErrorLine(it, null) }
@@ -666,7 +666,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
 /** Everything failing right now; the legend's frame (or its tab) turns red while any is. */
 private fun problemCount(state: EyeState): Int = listOfNotNull(
     state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
-    state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.meProblem, state.alertProblem,
+    state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.roadsProblem, state.meProblem, state.alertProblem,
     state.shipsProblem, state.globeError,
 ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
 

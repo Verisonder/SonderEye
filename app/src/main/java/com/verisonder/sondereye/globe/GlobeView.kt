@@ -107,6 +107,13 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         requestRender()
     }
 
+    /** Street-level roads, drawn when closer than [maxAlt]; null clears them. */
+    fun setRoads(set: RoadSet?, maxAlt: Double) {
+        renderer.roads = set
+        renderer.roadsMaxAlt = maxAlt
+        requestRender()
+    }
+
     /** A satellite's orbit, or null to clear it. */
     fun setPath(points: List<com.verisonder.sondereye.core.V3>?) =
         setLines("orbit", if (points == null) emptyList() else listOf(GlobeLine(points, 0xFF4FC3F7.toInt())))

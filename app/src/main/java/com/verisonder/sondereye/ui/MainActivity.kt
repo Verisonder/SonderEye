@@ -62,6 +62,7 @@ import com.verisonder.sondereye.data.Net
 import com.verisonder.sondereye.data.Settings
 import com.verisonder.sondereye.data.Where
 import com.verisonder.sondereye.globe.GlobeLine
+import com.verisonder.sondereye.globe.RoadSet
 import com.verisonder.sondereye.globe.GlobeStatus
 import com.verisonder.sondereye.globe.GlobeView
 import com.verisonder.sondereye.globe.Marker
@@ -223,6 +224,8 @@ class EyeState {
     val busLines = Feed<BusLine>()
     var busStops by mutableStateOf<List<BusStop>>(emptyList())
     var busLinesNote by mutableStateOf<String?>(null)
+    /** Why the street-level roads could not load, if they could not. */
+    var roadsProblem by mutableStateOf<String?>(null)
     /** Live buses, and what the legend says about where they come from. */
     val buses = Feed<Bus>()
     var busesNote by mutableStateOf<String?>(null)
@@ -447,6 +450,7 @@ class MainActivity : ComponentActivity() {
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
+                        if (roadsWanted() && !roadsLoading && now - roadsAttemptAt >= 15_000 && roadsStale()) loadRoads()
                         if (l.busLines) {
                             if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busLinesStale()) loadBusLines()
                             showBusStops()
@@ -539,6 +543,11 @@ class MainActivity : ComponentActivity() {
         val overlays = ArrayList<TileSource>()
         // Streets already draws its own roads and names.
         if (l.map != MapStyle.STREETS && l.roads) { overlays.add(TileSource.ROADS); overlays.add(TileSource.ROAD_NAMES) }
+        if (!roadsWanted()) {
+            roadArea.centre = null
+            state.roadsProblem = null
+            globe?.setRoads(null, 0.0)
+        }
         if (l.map != MapStyle.STREETS && l.labels) overlays.add(TileSource.LABELS)
         if (l.dayNight && l.lights) overlays.add(0, TileSource.LIGHTS)
         val r = state.radar.items
@@ -561,7 +570,7 @@ class MainActivity : ComponentActivity() {
         val shown = listOf(base) + overlays
         val all = (shown + TileSource.BLUE_MARBLE).map { it.credit }.toMutableList()
         val required = shown.filter { it.id.startsWith("esri") || it.id.startsWith("rain") }.map { it.credit }.toMutableList()
-        if (state.layers.cameras || state.layers.busLines || state.search.searched) {
+        if (state.layers.cameras || state.layers.busLines || roadsWanted() || state.search.searched) {
             all.add("© OpenStreetMap contributors"); required.add("© OpenStreetMap contributors")
         }
         state.allCredits = all.distinct()
@@ -986,6 +995,50 @@ class MainActivity : ComponentActivity() {
                 list.map { cam ->
                     Marker("c:" + cam.id, cam.lat, cam.lon, 11f * density, (if (cam.alpr) Palette.alpr else Palette.camera).toArgb())
                 }
+            }
+        }
+    }
+
+    // ---- Street roads (OpenStreetMap, drawn by the app) -----------------------------------
+
+    private val roadArea = Area()
+    private var roadsLoading = false
+    private var roadsAttemptAt = 0L
+
+    private fun roadsWanted() = state.layers.roads && state.layers.map != MapStyle.STREETS
+
+    /** Like the bus lines: a loaded box serves every closer view inside it. */
+    private fun roadsStale(): Boolean {
+        val c = globe?.center() ?: return false
+        if (c[2] > ROADS_VECTOR_ALT) return false
+        val last = roadArea.centre ?: return true
+        val moved = Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000
+        return moved > last[2] * 0.5 || roadsRadius(c[2]) > last[2] * 1.25
+    }
+
+    private fun roadsRadius(alt: Double) = (alt * 1.6).coerceIn(1_500.0, 5_000.0)
+
+    private fun loadRoads() {
+        val c = globe?.center() ?: return
+        roadsAttemptAt = System.currentTimeMillis()
+        roadsLoading = true
+        val r = roadsRadius(c[2])
+        val b = box(c, r, 1.0)
+        run("roads") {
+            val out = withContext(Dispatchers.IO) { Feeds.roads(b[0], b[1], b[2], b[3]) }
+            roadsLoading = false
+            when (out) {
+                is Net.Outcome.Ok -> {
+                    val set = withContext(Dispatchers.Default) {
+                        val origin = Geo.ecef(c[0], c[1])
+                        RoadSet(origin, com.verisonder.sondereye.core.OsmRoads.ribbons(out.value, origin, ROAD_LIFT_M))
+                    }
+                    if (!roadsWanted()) return@run
+                    roadArea.centre = doubleArrayOf(c[0], c[1], r)
+                    state.roadsProblem = null
+                    globe?.setRoads(set, ROADS_VECTOR_ALT)
+                }
+                is Net.Outcome.Failed -> state.roadsProblem = out.message
             }
         }
     }
@@ -1671,6 +1724,9 @@ class MainActivity : ComponentActivity() {
         private const val WEBCAMS_MAX_ALT = 1_000_000.0
         private const val FIRES_MAX_ALT = 6_000_000.0
         /** Bus routes come from Overpass in city-sized boxes; stops only at street scale. */
+        /** Closer than this, the app draws the roads itself (Esri's layer has no lines there). */
+        private const val ROADS_VECTOR_ALT = 3_500.0
+        private const val ROAD_LIFT_M = 2.0
         private const val BUS_LINES_MAX_ALT = 40_000.0
         private const val BUS_STOPS_MAX_ALT = 12_000.0
         private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it

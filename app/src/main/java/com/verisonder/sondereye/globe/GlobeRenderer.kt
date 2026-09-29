@@ -5,6 +5,7 @@ import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import com.verisonder.sondereye.core.Astro
+import com.verisonder.sondereye.core.OsmRoads
 import com.verisonder.sondereye.core.CameraState
 import com.verisonder.sondereye.core.Geo
 import com.verisonder.sondereye.core.M4
@@ -45,6 +46,9 @@ class Marker(
 }
 
 /** A line through world space (an orbit, a flight's trail), metres. */
+/** Street roads ready for the GPU: ribbons per class around one origin (see [OsmRoads.ribbons]). */
+class RoadSet(val origin: V3, val ribbons: Array<FloatArray>)
+
 /** A polyline; with [pairs], separate segments (each two points), all in one draw. */
 class GlobeLine(val points: List<V3>, val rgb: Int, val alpha: Float = 1f, val pairs: Boolean = false)
 
@@ -74,6 +78,14 @@ class GlobeRenderer(
     @Volatile var selectedKey: String? = null
     /** Lines drawn over the globe: orbits, trails. */
     @Volatile var lines: List<GlobeLine> = emptyList()
+    /**
+     * Street-level roads, one ribbon array per class ([OsmRoads.ribbons]) around [origin];
+     * drawn over the picture and under the names, only when the view is closer than
+     * [roadsMaxAlt]. Null: none.
+     */
+    @Volatile var roads: RoadSet? = null
+    @Volatile var roadsMaxAlt: Double = 0.0
+
     /** Shade the night side (and show night lights where that overlay is on). */
     @Volatile var dayNight: Boolean = false
 
@@ -136,11 +148,13 @@ class GlobeRenderer(
         indexBuffers.clear()
         pathVbo = 0
         quadVbo2 = 0
+        roadVbos = IntArray(0); roadCounts = IntArray(0); roadsUploaded = null
         broken = false
         try {
             tileProg = program(TILE_VS, TILE_FS, "imagery")
             pointProg = program(POINT_VS, POINT_FS, "markers")
             glowProg = program(GLOW_VS, GLOW_FS, "atmosphere")
+            roadProg = program(ROAD_VS, ROAD_FS, "roads")
         } catch (e: IllegalStateException) {
             broken = true
             onError(e.message ?: "Globe: shaders failed")
@@ -232,6 +246,11 @@ class GlobeRenderer(
         }
         // Base first, opaque; then each overlay over it on the same meshes.
         for ((pass, src) in (listOf(baseSrc) + overlaySrcs).withIndex()) {
+            if (pass == 1) {
+                // Street roads go on the picture and under every overlay (names stay readable).
+                drawRoads(view)
+                GLES30.glUseProgram(tileProg)
+            }
             if (pass >= 1) {
                 GLES30.glEnable(GLES30.GL_BLEND)
                 // Lights add to the dark ground; everything else is laid over it.
@@ -244,7 +263,7 @@ class GlobeRenderer(
             // Only the picture itself goes dark at night; roads, names and radar stay readable.
             GLES30.glUniform1f(uShade, if (shading && pass == 0) 1f else 0f)
             for (k in tiles) {
-                if (k.z < src.minZoom) continue
+                if (k.z < src.minZoom || k.z > src.maxDrawZoom) continue
                 val want = SourcedTile(src, src.keyFor(k))
                 var found: SourcedTile? = null
                 // Roads, labels and radar only download once the picture under them has:
@@ -298,6 +317,10 @@ class GlobeRenderer(
                 }
                 drawMesh(mesh(k), TileMesh.segments(k.z))
             }
+        }
+        if (overlaySrcs.isEmpty()) {
+            drawRoads(view)
+            GLES30.glUseProgram(tileProg)
         }
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glDepthMask(true)
@@ -567,6 +590,56 @@ class GlobeRenderer(
     // ---- Lines (orbits, trails) --------------------------------------------------------
 
     private var pathVbo = 0
+
+    // ---- Street roads -----------------------------------------------------------------
+
+    private var roadProg = 0
+    private var roadVbos = IntArray(0)
+    private var roadCounts = IntArray(0)
+    private var roadsUploaded: RoadSet? = null
+
+    private fun drawRoads(view: com.verisonder.sondereye.core.View) {
+        val set = roads
+        if (set == null || view.cam.alt > roadsMaxAlt) return
+        if (set !== roadsUploaded) {
+            if (roadVbos.isNotEmpty()) GLES30.glDeleteBuffers(roadVbos.size, roadVbos, 0)
+            roadVbos = IntArray(set.ribbons.size)
+            GLES30.glGenBuffers(roadVbos.size, roadVbos, 0)
+            roadCounts = IntArray(set.ribbons.size)
+            for ((i, f) in set.ribbons.withIndex()) {
+                GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, roadVbos[i])
+                val buf = ByteBuffer.allocateDirect(maxOf(4, f.size * 4)).order(ByteOrder.nativeOrder())
+                buf.asFloatBuffer().put(f)
+                GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, f.size * 4, buf, GLES30.GL_STATIC_DRAW)
+                roadCounts[i] = f.size / OsmRoads.FLOATS_PER_VERTEX
+            }
+            roadsUploaded = set
+        }
+        GLES30.glUseProgram(roadProg)
+        M4.toFloat(view.mvp(set.origin), mvp)
+        GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(roadProg, "uMvp"), 1, false, mvp, 0)
+        GLES30.glUniform2f(GLES30.glGetUniformLocation(roadProg, "uViewport"), width.toFloat(), height.toFloat())
+        val uWidth = GLES30.glGetUniformLocation(roadProg, "uWidth")
+        val uColor = GLES30.glGetUniformLocation(roadProg, "uColor")
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glDepthMask(false)
+        // Minor roads first, so the main roads are drawn over them where they meet.
+        for (c in roadVbos.indices.reversed()) {
+            if (roadCounts[c] == 0) continue
+            val st = ROAD_STYLE[c]
+            GLES30.glUniform1f(uWidth, st.first * density)
+            val rgb = st.second
+            GLES30.glUniform4f(uColor, ((rgb shr 16) and 255) / 255f, ((rgb shr 8) and 255) / 255f, (rgb and 255) / 255f, ROAD_ALPHA)
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, roadVbos[c])
+            val stride = OsmRoads.FLOATS_PER_VERTEX * 4
+            GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride, 0)
+            GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 3, GLES30.GL_FLOAT, false, stride, 12)
+            GLES30.glEnableVertexAttribArray(2); GLES30.glVertexAttribPointer(2, 1, GLES30.GL_FLOAT, false, stride, 24)
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, roadCounts[c])
+        }
+        GLES30.glDisableVertexAttribArray(2)
+    }
     private var lineScratch = FloatArray(0)
 
     private fun drawLines(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int, uAlpha: Int, uCenter: Int) {
@@ -714,6 +787,43 @@ class GlobeRenderer(
         private const val SPACE_R = 0.012f; private const val SPACE_G = 0.024f; private const val SPACE_B = 0.039f
         private const val OCEAN_R = 0.043f; private const val OCEAN_G = 0.102f; private const val OCEAN_B = 0.165f
         private const val CAP_R = 0.043f; private const val CAP_G = 0.102f; private const val CAP_B = 0.165f
+
+        /** Width in dp and colour per road class (motorway first), close to Esri's own. */
+        private val ROAD_STYLE = listOf(
+            5.5f to 0xF2A07A, 4.5f to 0xF5B794, 4f to 0xF7C9A8, 3.5f to 0xF3DDBA, 2.6f to 0xEFE3C8, 1.6f to 0xE2D8C6,
+        )
+        private const val ROAD_ALPHA = 0.9f
+
+        /** A road band: each vertex pushed sideways (and past its end, to close the joins) in pixels. */
+        private const val ROAD_VS = """#version 300 es
+uniform mat4 uMvp;
+uniform vec2 uViewport;
+uniform float uWidth;
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aOther;
+layout(location = 2) in float aSide;
+void main() {
+    vec4 p = uMvp * vec4(aPos, 1.0);
+    vec4 q = uMvp * vec4(aOther, 1.0);
+    if (p.w <= 0.0 || q.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    vec2 d = (q.xy / q.w - p.xy / p.w) * uViewport;
+    float len = length(d);
+    vec2 dir = len > 0.0 ? d / len : vec2(1.0, 0.0);
+    vec2 n = vec2(-dir.y, dir.x);
+    vec2 px = (n * aSide - dir) * (0.5 * uWidth);
+    p.xy += px * 2.0 / uViewport * p.w;
+    gl_Position = p;
+}
+"""
+
+        private const val ROAD_FS = """#version 300 es
+precision mediump float;
+uniform vec4 uColor;
+out vec4 color;
+void main() {
+    color = uColor;
+}
+"""
 
         private const val TILE_VS = """#version 300 es
 uniform mat4 uMvp;

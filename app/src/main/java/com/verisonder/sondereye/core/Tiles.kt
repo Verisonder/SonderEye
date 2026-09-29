@@ -24,6 +24,8 @@ class TileSource(
     val emptyIsMissing: Boolean = false,
     /** Not drawn on tiles shallower than this (another source covers those zooms). */
     val minZoom: Int = 0,
+    /** Not drawn on tiles deeper than this (the app draws these zooms itself). */
+    val maxDrawZoom: Int = 99,
     private val template: (z: Int, x: Int, y: Int) -> String,
 ) {
     fun url(k: TileKey) = template(k.z, k.x, k.y)
@@ -73,11 +75,14 @@ class TileSource(
 
         /**
          * Esri's roads layer stops drawing the road lines past zoom 15 and keeps only their
-         * names ("at the largest scales, the line symbols are hidden"). So the lines are
-         * taken from zoom 15 and stretched when closer, and the names come from the same
-         * layer at full depth, from zoom 16 on.
+         * names ("at the largest scales, the line symbols are hidden"). So it is drawn up to
+         * zoom 15; deeper, the app draws the roads itself from OpenStreetMap ([OsmRoads])
+         * and the names come from the same Esri layer at full depth.
          */
-        val ROADS = TileSource("esri-roads", ROAD_LINES_MAX_Z, true, "Roads: Esri", emptyIsMissing = true, template = esri("Reference/World_Transportation"))
+        val ROADS = TileSource(
+            "esri-roads", ROAD_LINES_MAX_Z, true, "Roads: Esri", emptyIsMissing = true,
+            maxDrawZoom = ROAD_LINES_MAX_Z, template = esri("Reference/World_Transportation"),
+        )
         val ROAD_NAMES = TileSource("esri-road-names", 19, true, "Roads: Esri", minZoom = ROAD_LINES_MAX_Z + 1, template = esri("Reference/World_Transportation"))
         val LABELS = TileSource("esri-labels", 19, true, "Labels: Esri", template = esri("Reference/World_Boundaries_and_Places"))
 

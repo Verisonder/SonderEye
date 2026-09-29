@@ -93,6 +93,9 @@ object Feeds {
 
     fun conflicts() = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT", com.verisonder.sondereye.core.Gdelt::parse)
 
+    fun roads(s: Double, w: Double, n: Double, e: Double) =
+        Net.postSlow(Overpass.URL, com.verisonder.sondereye.core.OsmRoads.query(s, w, n, e), "Roads", "OpenStreetMap Overpass", com.verisonder.sondereye.core.OsmRoads::parse)
+
     fun busLines(s: Double, w: Double, n: Double, e: Double) =
         Net.postSlow(Overpass.URL, BusLines.query(s, w, n, e), "Bus lines", "OpenStreetMap Overpass", BusLines::parse)
 
