@@ -1,0 +1,97 @@
+name: Windows
+
+# The Windows app (desktop/): a setup .exe and a portable zip.
+# test/windows builds a pre-release named windows-test; a v* tag adds both files to that release.
+on:
+  push:
+    branches:
+      - 'test/windows'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build the Windows app
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Cache the bundled Blue Marble tiles
+        uses: actions/cache@v4
+        with:
+          path: desktop/app/src/main/resources/bluemarble
+          key: bluemarble-desktop-${{ hashFiles('tools/fetch_bluemarble.py') }}
+      - name: Fetch the bundled Blue Marble tiles (NASA, public domain)
+        shell: bash
+        run: python tools/fetch_bluemarble.py desktop/app/src/main/resources/bluemarble 2>&1 | tail -n 5
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon -p desktop :shared:test :app:packageExe :app:createDistributable 2>&1 | tee build.log
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/.*val appVersion = "\(.*\)".*/\1/p' desktop/app/build.gradle.kts)
+          EXE=$(find desktop/app/build/compose/binaries/main/exe -name '*.exe' | head -n 1)
+          if [ -z "$EXE" ]; then echo "::error::No installer was produced."; exit 1; fi
+          cp "$EXE" "SonderEye-$VERSION-Setup.exe"
+          powershell -NoProfile -Command "Compress-Archive -Path 'desktop/app/build/compose/binaries/main/app/SonderEye' -DestinationPath 'SonderEye-$VERSION-Portable.zip'"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Publish (test build)
+        if: startsWith(github.ref, 'refs/heads/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete windows-test --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create windows-test "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" \
+            --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+            --title "SonderEye for Windows, test build" \
+            --notes "Test build from $GITHUB_REF_NAME at $GITHUB_SHA"
+
+      - name: Publish (release)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+        run: |
+          # The Android release job creates the release; wait for it, then add the Windows files.
+          for i in $(seq 1 60); do
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            sleep 20
+          done
+          gh release upload "$GITHUB_REF_NAME" "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Report the failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The build output goes on the pre-release windows-ci-failure, where the API can read it.
+          touch build.log
+          gh release view windows-ci-failure --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create windows-ci-failure --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Last Windows CI failure" --notes "Replaced on every failed Windows build."
+          (echo "$GITHUB_WORKFLOW on $GITHUB_REF_NAME at $GITHUB_SHA"; grep -E "^e: |error:|FAILED|What went wrong" -A3 build.log | head -n 400; echo ---; tail -n 150 build.log) > failure.txt
+          gh release upload windows-ci-failure failure.txt --repo "$GITHUB_REPOSITORY" --clobber
