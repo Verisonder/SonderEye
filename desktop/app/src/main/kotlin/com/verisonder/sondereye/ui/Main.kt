@@ -90,6 +90,9 @@ private fun window() = application {
                     Key.A, Key.DirectionLeft -> { controller.keyMove(-1, 0, down); true }
                     Key.D, Key.DirectionRight -> { controller.keyMove(1, 0, down); true }
                     Key.E -> { if (down) controller.keyNearest(); true }
+                    // Held: Ctrl zooms in, Space zooms out, smoothly, until let go.
+                    Key.CtrlLeft, Key.CtrlRight -> { controller.keyZoom(if (down) KEY_ZOOM else 0.0); true }
+                    Key.Spacebar -> { controller.keyZoom(if (down) -KEY_ZOOM else 0.0); true }
                     Key.Enter, Key.NumPadEnter -> { if (down) controller.keyOpen(); true }
                     else -> false
                 }
@@ -107,6 +110,9 @@ private fun window() = application {
         }
     }
 }
+
+/** Keyboard zoom speed: e-folds of height a second (about 3.3 times closer each second). */
+private const val KEY_ZOOM = 1.2
 
 /** How much larger than on the phone everything is drawn. */
 private const val UI_SCALE = 1.25f

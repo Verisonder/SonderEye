@@ -1833,6 +1833,8 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
     fun keyMove(dx: Int, dy: Int, down: Boolean) = globe?.keyMove(dx, dy, down)
     fun keyNearest() = globe?.focusNearest()
     fun keyOpen() = globe?.openFocused()
+    /** Held: Ctrl zooms in, Space zooms out ([rate] in e-folds of height a second; 0 stops). */
+    fun keyZoom(rate: Double) = globe?.zoomHold(rate)
 
     /** The window is closing. */
     fun close() {

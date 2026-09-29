@@ -108,7 +108,7 @@ compiled straight from `app/src/main/java`, so both behave the same.
   `SonderEye.exe` that runs from anywhere. Both include their own Java runtime.
 - **Touchpad**: slide two fingers to move the map, pinch to zoom.
 - **Keyboard**: W A S D (or the arrows) move the map, E picks the point nearest the middle
-  (E again for the next), Enter opens it.
+  (E again for the next), Enter opens it. Hold Ctrl to zoom in, Space to zoom out.
 - **Mouse**: drag to move, wheel to zoom at the pointer, right-drag to turn, click to pick,
   double-click to zoom in, right-click (or hold still a second) for the weather there and
   to set it as your place. Escape closes the panel or card on top. It opens full screen; F11
