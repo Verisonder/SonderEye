@@ -205,7 +205,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         val hidden = state.chromeHidden
-        if (!hidden) CompassRose(state.view?.getOrNull(3) ?: 0.0, Modifier.align(Alignment.Center))
+        if (!hidden) RadarScope(state.view, Modifier.align(Alignment.Center))
 
         // An open panel takes the space; the legend and readout step aside rather than show under it.
         // In the clean view everything steps aside.
