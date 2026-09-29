@@ -147,6 +147,12 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     fun setPath(points: List<com.verisonder.sondereye.core.V3>?) =
         setLines("orbit", if (points == null) emptyList() else listOf(GlobeLine(points, 0xFF4FC3F7.toInt())))
 
+    /** Pins drawn at this size times their own (menu: Pin size). */
+    fun setPinScale(scale: Float) {
+        renderer.pinScale = scale
+        requestRender()
+    }
+
     fun setDayNight(on: Boolean) {
         renderer.dayNight = on
         requestRender()

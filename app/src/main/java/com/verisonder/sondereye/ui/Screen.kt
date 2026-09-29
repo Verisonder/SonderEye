@@ -1826,6 +1826,8 @@ private fun LayersPanel(
             Divider()
             FoHeader("Map", Modifier.padding(bottom = 6.dp))
             ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
+            Text("Pin size", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            ChipRow(listOf(0.5f, 0.7f, 1f), s.pinScale, { mapOf(0.5f to "Small", 0.7f to "Medium", 1f to "Large")[it] ?: "" }, true) { change(s.copy(pinScale = it)) }
             Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
                 Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
                 Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }

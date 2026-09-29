@@ -94,6 +94,9 @@ class GlobeRenderer(
     /** One route shown on its own, bold, over everything but the markers (a picked bus line). */
     @Volatile var highlight: RoadSet? = null
 
+    /** Pins drawn at this size times their own (menu: Pin size). */
+    @Volatile var pinScale: Float = 1f
+
     /** Draw nothing but empty space (the start-up screen is still up; the globe waits behind it). */
     @Volatile var hold: Boolean = false
 
@@ -550,7 +553,8 @@ class GlobeRenderer(
         fun put(m: Marker, ring: Boolean) {
             // Relative to the eye in double, then float: no jitter when close.
             a[o++] = (m.pos.x - eye.x).toFloat(); a[o++] = (m.pos.y - eye.y).toFloat(); a[o++] = (m.pos.z - eye.z).toFloat()
-            a[o++] = (if (ring) m.sizePx + 14f * density else m.sizePx)
+            val px = m.sizePx * pinScale
+            a[o++] = (if (ring) px + 14f * density else px)
             a[o++] = ((m.rgb shr 16) and 0xFF) / 255f
             a[o++] = ((m.rgb shr 8) and 0xFF) / 255f
             a[o++] = (m.rgb and 0xFF) / 255f
