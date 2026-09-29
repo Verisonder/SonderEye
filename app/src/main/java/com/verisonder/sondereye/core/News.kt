@@ -3,19 +3,68 @@ package com.verisonder.sondereye.core
 /** One story from a publisher's RSS feed: their own headline and summary. */
 data class Story(val source: String, val title: String, val summary: String, val link: String, val timeMs: Long?)
 
-class NewsSource(val name: String, val url: String)
+class NewsSource(val id: String, val name: String, val url: String, val topic: String)
+
+/** How the user wants the day's brief. */
+data class BriefPrefs(
+    /** Ids of the built-in sources that are on. */
+    val sources: Set<String> = setOf("bbc", "aljazeera", "mwn"),
+    /** The user's own feed addresses (RSS or Atom). */
+    val custom: List<String> = emptyList(),
+    val stories: Int = 12,
+    /** Only stories mentioning one of these words (empty: all). */
+    val include: String = "",
+    /** Never stories mentioning one of these words. */
+    val exclude: String = "",
+    val weather: Boolean = true,
+    // The written summary (Gemini).
+    val length: Int = 5,
+    val language: String = "English",
+    val bullets: Boolean = false,
+    /** Free text: "focus on Morocco and technology". */
+    val focus: String = "",
+)
 
 object News {
-    /** Free, keyless publisher feeds: world news, and Morocco. */
+    /** Free, keyless publisher feeds. */
     val SOURCES = listOf(
-        NewsSource("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
-        NewsSource("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
-        NewsSource("Morocco World News", "https://www.moroccoworldnews.com/feed/"),
+        NewsSource("bbc", "BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml", "World"),
+        NewsSource("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "World"),
+        NewsSource("guardian", "The Guardian", "https://www.theguardian.com/world/rss", "World"),
+        NewsSource("npr", "NPR", "https://feeds.npr.org/1001/rss.xml", "World"),
+        NewsSource("france24", "France 24", "https://www.france24.com/en/rss", "World"),
+        NewsSource("mwn", "Morocco World News", "https://www.moroccoworldnews.com/feed/", "Morocco"),
+        NewsSource("hespress", "Hespress (French)", "https://fr.hespress.com/feed", "Morocco"),
+        NewsSource("bbcbusiness", "BBC Business", "https://feeds.bbci.co.uk/news/business/rss.xml", "Business"),
+        NewsSource("bbcscience", "BBC Science", "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml", "Science"),
+        NewsSource("techcrunch", "TechCrunch", "https://techcrunch.com/feed/", "Technology"),
+        NewsSource("hn", "Hacker News", "https://hnrss.org/frontpage", "Technology"),
+        NewsSource("bbcsport", "BBC Sport", "https://feeds.bbci.co.uk/sport/rss.xml", "Sport"),
     )
 
-    /** Items of an RSS 2.0 feed. A small reader: feeds are simple, and this stays testable off-device. */
+    /** The feeds to read for these preferences: chosen built-ins, then the user's own. */
+    fun sourcesFor(p: BriefPrefs): List<NewsSource> =
+        SOURCES.filter { it.id in p.sources } +
+            p.custom.filter { it.isNotBlank() }.map { url ->
+                val host = runCatching { java.net.URI(url.trim()).host?.removePrefix("www.") }.getOrNull() ?: url
+                NewsSource("custom:$url", host, url.trim(), "Yours")
+            }
+
+    /** Keep stories matching the include words (if any) and none of the exclude words. */
+    fun filter(stories: List<Story>, include: String, exclude: String): List<Story> {
+        fun words(s: String) = s.split(',', ' ', ';').map { it.trim().lowercase() }.filter { it.length >= 2 }
+        val inc = words(include)
+        val exc = words(exclude)
+        return stories.filter { st ->
+            val text = (st.title + " " + st.summary).lowercase()
+            (inc.isEmpty() || inc.any { it in text }) && exc.none { it in text }
+        }
+    }
+
+    /** Items of an RSS 2.0 or Atom feed. A small reader: feeds are simple, and this stays testable off-device. */
     fun parseRss(source: String, xml: String): List<Story> {
-        if (!xml.contains("<rss") && !xml.contains("<channel")) throw Json.ParseError("Not an RSS feed")
+        if (xml.contains("<feed") && xml.contains("<entry")) return parseAtom(source, xml)
+        if (!xml.contains("<rss") && !xml.contains("<channel")) throw Json.ParseError("Not an RSS or Atom feed")
         val out = ArrayList<Story>()
         for (m in Regex("<item\\b[^>]*>(.*?)</item>", RegexOption.DOT_MATCHES_ALL).findAll(xml)) {
             val body = m.groupValues[1]
@@ -26,6 +75,30 @@ object News {
         }
         return out
     }
+
+    private fun parseAtom(source: String, xml: String): List<Story> {
+        val out = ArrayList<Story>()
+        for (m in Regex("<entry\\b[^>]*>(.*?)</entry>", RegexOption.DOT_MATCHES_ALL).findAll(xml)) {
+            val body = m.groupValues[1]
+            val title = text(tag(body, "title")) ?: continue
+            val link = Regex("<link\\b[^>]*href=\"([^\"]+)\"").find(body)?.groupValues?.get(1) ?: ""
+            val summary = text(tag(body, "summary") ?: tag(body, "content"))?.let(::firstSentences) ?: ""
+            val time = (tag(body, "published") ?: tag(body, "updated"))?.let { text(it) }?.let { iso(it) }
+            out.add(Story(source, title, summary, link, time))
+        }
+        return out
+    }
+
+    /** "2026-09-29T07:15:00Z" or with "+02:00" → epoch ms. */
+    fun iso(s: String): Long? = runCatching {
+        val base = Eonet.isoMs(s.take(19) + "Z")!!
+        val z = s.drop(19).dropWhile { it == '.' || it.isDigit() }
+        val off = if (z.startsWith("+") || z.startsWith("-")) {
+            val sign = if (z[0] == '-') -1 else 1
+            sign * (z.substring(1, 3).toInt() * 60 + z.substring(4, 6).toInt())
+        } else 0
+        base - off * 60_000L
+    }.getOrNull()
 
     private fun tag(body: String, name: String): String? =
         Regex("<$name\\b[^>]*>(.*?)</$name>", RegexOption.DOT_MATCHES_ALL).find(body)?.groupValues?.get(1)
@@ -40,6 +113,8 @@ object News {
             .replace("&#8220;", "“").replace("&#8221;", "”").replace("&#8211;", "–").replace("&#8230;", "…")
         s = Regex("&#(\\d+);").replace(s) { it.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: "" }
         s = s.replace("&amp;", "&")
+        // Some feeds escape their HTML (&lt;p&gt;): decoding revealed tags, drop them too.
+        s = s.replace(Regex("<[^>]+>"), " ")
         return s.replace(Regex("\\s+"), " ").trim().ifEmpty { null }
     }
 
@@ -98,13 +173,18 @@ object Gemini {
     fun url(model: String, key: String) =
         "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" + java.net.URLEncoder.encode(key.trim(), "UTF-8")
 
-    fun request(stories: List<Story>, weather: String?, place: String?): String {
+    fun request(stories: List<Story>, weather: String?, place: String?, p: BriefPrefs = BriefPrefs()): String {
         val list = stories.joinToString("\n") { "- ${it.title}: ${it.summary} (${it.source})" }
         val prompt = buildString {
-            append("Write a short morning brief in plain English for one reader")
+            append("Write a brief of today's news for one reader")
             if (place != null) append(" in $place")
-            append(". Five sentences at most, calm and factual. Use only the headlines and summaries below; ")
-            append("do not add facts, numbers or opinions that are not in them. No title, no bullet points.\n\n")
+            append(", in ${p.language}. ")
+            if (p.bullets) append("Use at most ${p.length} short bullet points, one idea each. ")
+            else append("Use at most ${p.length} sentences in one paragraph. ")
+            append("Calm and factual. Use only the headlines and summaries below; ")
+            append("do not add facts, numbers or opinions that are not in them. No title.")
+            if (p.focus.isNotBlank()) append(" The reader asked: \"${p.focus.trim().take(200)}\" — follow that where the headlines allow.")
+            append("\n\n")
             if (weather != null) append("Weather today: $weather\n\n")
             append("Headlines:\n").append(list)
         }

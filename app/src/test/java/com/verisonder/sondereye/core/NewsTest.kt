@@ -44,10 +44,34 @@ class NewsTest {
         assertEquals(listOf("Storm Gonzalo heads for the Azores", "Talks resume in Geneva"), t.map { it.title })
     }
 
+    @Test fun atomAndIso() {
+        val atom = """<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>X</title>
+<entry><title>New phone released</title><link rel="alternate" href="https://ex.com/a"/>
+<summary type="html">&lt;p&gt;It is thin. It is fast.&lt;/p&gt;</summary><published>2026-09-29T08:00:00+02:00</published></entry></feed>"""
+        val s = News.parseRss("Ex", atom)
+        assertEquals(1, s.size)
+        assertEquals("https://ex.com/a", s[0].link)
+        assertEquals("It is thin. It is fast.", s[0].summary)
+        assertEquals(Eonet.isoMs("2026-09-29T06:00:00Z"), s[0].timeMs)
+        assertEquals(Eonet.isoMs("2026-09-29T07:15:00Z"), News.iso("2026-09-29T07:15:00.123Z"))
+    }
+
+    @Test fun sourcesAndFilters() {
+        val p = BriefPrefs(sources = setOf("bbc", "hn"), custom = listOf("https://www.example.org/feed.xml"))
+        assertEquals(listOf("BBC World", "Hacker News", "example.org"), News.sourcesFor(p).map { it.name })
+        val st = listOf(Story("A", "Morocco wins the cup", "", "", 0), Story("A", "Election in France", "", "", 0), Story("A", "Tech in Rabat", "Morocco startups", "", 0))
+        assertEquals(2, News.filter(st, "morocco", "").size)
+        assertEquals(listOf("Election in France"), News.filter(st, "", "morocco").map { it.title })
+        assertEquals(3, News.filter(st, "", "").size)
+    }
+
     @Test fun gemini() {
         val body = Gemini.request(listOf(Story("BBC", "T", "S", "l", 0)), "22 °C, clear", "Tangier")
         val prompt = ((((Json.parse(body) as Map<*, *>)["contents"] as List<*>)[0] as Map<*, *>)["parts"] as List<*>)[0] as Map<*, *>
         assertTrue((prompt["text"] as String).contains("- T: S (BBC)"))
+        val custom = Gemini.request(listOf(Story("BBC", "T", "S", "l", 0)), null, null, BriefPrefs(length = 3, language = "French", bullets = true, focus = "Morocco"))
+        val t = (((((Json.parse(custom) as Map<*, *>)["contents"] as List<*>)[0] as Map<*, *>)["parts"] as List<*>)[0] as Map<*, *>)["text"] as String
+        assertTrue(t.contains("in French") && t.contains("at most 3 short bullet points") && t.contains("\"Morocco\""))
         val ok = """{"candidates":[{"content":{"parts":[{"text":"Calm day. "},{"text":"Storm offshore."}]}}]}"""
         assertEquals("Calm day. Storm offshore.", Gemini.parse(ok))
         try { Gemini.parse("""{"error":{"code":400,"message":"API key not valid"}}"""); throw AssertionError() } catch (e: Json.ParseError) {

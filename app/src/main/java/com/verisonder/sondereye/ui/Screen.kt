@@ -114,6 +114,8 @@ import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.Ship
 import com.verisonder.sondereye.core.Webcam
 import com.verisonder.sondereye.data.Keys
+import com.verisonder.sondereye.core.BriefPrefs
+import com.verisonder.sondereye.core.News
 import com.verisonder.sondereye.core.EARTH_R
 import com.verisonder.sondereye.core.Forecast
 import com.verisonder.sondereye.core.Flight
@@ -156,6 +158,7 @@ class Actions(
     /** Open (true) or close the day's brief. */
     val brief: (Boolean) -> Unit,
     val reloadBrief: () -> Unit,
+    val briefPrefs: (BriefPrefs) -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -965,6 +968,13 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
                 )
                 IconButton(onClick = { actions.brief(false) }) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
             }
+            TextButton(onClick = {
+                if (b.editing) actions.reloadBrief() // leaving the settings: rebuild with them
+                b.editing = !b.editing
+            }, modifier = Modifier.padding(start = 0.dp)) {
+                Text(if (b.editing) "Done, rebuild my brief" else "Customise", color = Palette.accent)
+            }
+            if (b.editing) BriefSettings(b.prefs, actions.briefPrefs)
 
             // Weather where you are.
             val w = b.weather
@@ -1033,6 +1043,80 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
             }
         }
     }
+}
+
+/** What goes into the brief, and how the written summary reads. */
+@Composable
+private fun BriefSettings(p: BriefPrefs, set: (BriefPrefs) -> Unit) {
+    Column(Modifier.padding(bottom = 8.dp)) {
+        Toggle("Weather where I am", p.weather, true) { set(p.copy(weather = it)) }
+
+        Label("News sources")
+        for ((topic, group) in News.SOURCES.groupBy { it.topic }) {
+            Text(topic, color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (src in group) {
+                    FilterChip(
+                        selected = src.id in p.sources,
+                        onClick = { set(p.copy(sources = if (src.id in p.sources) p.sources - src.id else p.sources + src.id)) },
+                        label = { Text(src.name) },
+                    )
+                }
+            }
+        }
+
+        Label("My own feeds")
+        for (url in p.custom) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(url, color = Palette.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                TextButton(onClick = { set(p.copy(custom = p.custom - url)) }) { Text("Remove", color = Palette.error) }
+            }
+        }
+        var newFeed by remember { mutableStateOf("") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newFeed, onValueChange = { newFeed = it }, singleLine = true,
+                placeholder = { Text("Feed address (RSS or Atom)", color = Palette.dim) },
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = {
+                    val u = newFeed.trim().let { if (it.startsWith("http")) it else "https://$it" }
+                    if (u !in p.custom) set(p.copy(custom = p.custom + u))
+                    newFeed = ""
+                },
+                enabled = newFeed.contains('.'),
+            ) { Text("Add", color = Palette.accent) }
+        }
+
+        Label("Topics")
+        TextSetting("Only stories about (words, comma separated)", p.include) { set(p.copy(include = it)) }
+        TextSetting("Never stories about", p.exclude) { set(p.copy(exclude = it)) }
+
+        Label("Number of stories")
+        ChipRow(listOf(6, 12, 20), p.stories, { "$it" }, true) { set(p.copy(stories = it)) }
+
+        Label("Written summary (needs a Gemini key)")
+        ChipRow(listOf(3, 5, 8), p.length, { mapOf(3 to "Short", 5 to "Medium", 8 to "Detailed")[it]!! }, true) { set(p.copy(length = it)) }
+        ChipRow(listOf(false, true), p.bullets, { if (it) "Bullet points" else "Paragraph" }, true) { set(p.copy(bullets = it)) }
+        ChipRow(listOf("English", "French", "Arabic", "Spanish"), p.language, { it }, true) { set(p.copy(language = it)) }
+        TextSetting("What should it focus on? (for example: Morocco, tech, markets)", p.focus) { set(p.copy(focus = it)) }
+    }
+}
+
+/** A text preference saved as you type. */
+@Composable
+private fun TextSetting(hint: String, value: String, save: (String) -> Unit) {
+    var text by remember(hint) { mutableStateOf(value) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it; save(it) },
+        singleLine = true,
+        placeholder = { Text(hint, color = Palette.dim, fontSize = 14.sp) },
+        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    )
 }
 
 // ---- Search ----------------------------------------------------------------------------------

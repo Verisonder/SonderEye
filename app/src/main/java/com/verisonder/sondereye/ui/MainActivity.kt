@@ -26,6 +26,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.verisonder.sondereye.core.Ais
 import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.Hotspot
+import com.verisonder.sondereye.core.BriefPrefs
 import com.verisonder.sondereye.core.News
 import com.verisonder.sondereye.core.Ship
 import com.verisonder.sondereye.core.Story
@@ -120,6 +121,9 @@ class BriefState {
     var summary by mutableStateOf<String?>(null)
     var summaryProblem by mutableStateOf<String?>(null)
     var loadedAt = 0L
+    var prefs by mutableStateOf(BriefPrefs())
+    /** The customise section is open. */
+    var editing by mutableStateOf(false)
 }
 
 class SearchState {
@@ -221,6 +225,7 @@ class MainActivity : ComponentActivity() {
         store = Settings(this)
         state.layers = store.load()
         state.keys = store.keys()
+        state.brief.prefs = store.brief()
         installHttpCache()
         where = Where(
             this,
@@ -302,6 +307,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         reloadBrief = ::loadBrief,
+                        briefPrefs = { p ->
+                            state.brief.prefs = p
+                            store.saveBrief(p)
+                        },
                         saveKeys = { k ->
                             store.saveKeys(k)
                             state.keys = store.keys()
@@ -472,8 +481,11 @@ class MainActivity : ComponentActivity() {
         b.summaryProblem = null
         run("brief") {
             // Weather where you are (or where you last were).
+            val p = b.prefs
             val here = state.me?.let { doubleArrayOf(it.latitude, it.longitude) } ?: store.home()
-            if (here == null) {
+            if (!p.weather) {
+                b.weather = null; b.forecast = null; b.weatherProblem = null
+            } else if (here == null) {
                 b.weatherProblem = "Weather: your location is not known yet. Tap the pin once, then open this again."
             } else {
                 when (val w = withContext(Dispatchers.IO) { Feeds.forecast(here[0], here[1]) }) {
@@ -483,7 +495,7 @@ class MainActivity : ComponentActivity() {
             }
             // Every feed at once; one failing does not stop the others.
             val results = withContext(Dispatchers.IO) {
-                News.SOURCES.map { src -> async { Feeds.news(src) } }.map { it.await() }
+                News.sourcesFor(p).map { src -> async { Feeds.news(src) } }.map { it.await() }
             }
             val stories = ArrayList<Story>()
             val problems = ArrayList<String>()
@@ -491,7 +503,8 @@ class MainActivity : ComponentActivity() {
                 is Net.Outcome.Ok -> stories.addAll(r.value)
                 is Net.Outcome.Failed -> problems.add(r.message)
             }
-            b.stories = News.today(stories, System.currentTimeMillis())
+            b.stories = News.today(News.filter(stories, p.include, p.exclude), System.currentTimeMillis(), p.stories)
+            if (News.sourcesFor(p).isEmpty()) problems.add("News: no sources chosen. Tap Customise.")
             b.newsProblems = problems
             b.loadedAt = System.currentTimeMillis()
             b.loading = false
@@ -502,7 +515,7 @@ class MainActivity : ComponentActivity() {
                     val d = b.forecast?.days?.firstOrNull()
                     "${w.tempC.roundToInt()} °C now, ${w.description.lowercase()}" + (d?.let { ", high ${it.maxC.roundToInt()} °C, low ${it.minC.roundToInt()} °C" } ?: "")
                 }
-                when (val s = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null) }) {
+                when (val s = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null, p) }) {
                     is Net.Outcome.Ok -> b.summary = s.value
                     is Net.Outcome.Failed -> b.summaryProblem = s.message
                 }

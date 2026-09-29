@@ -134,6 +134,7 @@ class GlobeRenderer(
         absent.clear()
         indexBuffers.clear()
         pathVbo = 0
+        quadVbo2 = 0
         broken = false
         try {
             tileProg = program(TILE_VS, TILE_FS, "imagery")
@@ -456,18 +457,23 @@ class GlobeRenderer(
 
     private var pointScratch = FloatArray(0)
 
+    /**
+     * Markers are small quads, one instance each. Things on the ground lie flat in the
+     * surface's tangent plane, so they follow the curve of the planet (discs turn into
+     * ovals towards the edge, and hide behind it) instead of floating towards the viewer.
+     * Things in orbit face the screen. Either way they keep the same size in pixels.
+     */
     private fun drawMarkers(view: com.verisonder.sondereye.core.View) {
         val list = markers
         val selKey = selectedKey
         val sel = if (selKey == null) null else list.firstOrNull { it.key == selKey }
         val count = list.size + if (sel != null) 1 else 0
         if (count == 0) return
-        val stride = 10 // x y z size r g b ring shape angle
+        val stride = 11 // x y z size r g b ring shape bearing billboard
         if (pointScratch.size < count * stride) pointScratch = FloatArray(count * stride)
         val a = pointScratch
         var o = 0
         val eye = view.eye
-        val heading = view.cam.heading
         fun put(m: Marker, ring: Boolean) {
             // Relative to the eye in double, then float: no jitter when close.
             a[o++] = (m.pos.x - eye.x).toFloat(); a[o++] = (m.pos.y - eye.y).toFloat(); a[o++] = (m.pos.z - eye.z).toFloat()
@@ -477,11 +483,16 @@ class GlobeRenderer(
             a[o++] = (m.rgb and 0xFF) / 255f
             a[o++] = if (ring) 1f else 0f
             a[o++] = m.shape.toFloat()
-            // On screen, a bearing turns with the map.
-            a[o++] = if (m.bearing.isNaN()) 0f else Geo.toRad(m.bearing - heading).toFloat()
+            a[o++] = if (m.bearing.isNaN()) 0f else Geo.toRad(m.bearing).toFloat()
+            a[o++] = if (m.altM > ORBIT_M) 1f else 0f
         }
         for (m in list) put(m, false)
         if (sel != null) put(sel, true)
+
+        if (quadVbo2 == 0) {
+            val ids = IntArray(1); GLES30.glGenBuffers(1, ids, 0); quadVbo2 = ids[0]
+            upload(quadVbo2, floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
+        }
 
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
@@ -490,19 +501,36 @@ class GlobeRenderer(
         M4.toFloat(view.projRot, mvp)
         GLES30.glUniformMatrix4fv(GLES30.glGetUniformLocation(pointProg, "uMvp"), 1, false, mvp, 0)
         GLES30.glUniform1f(GLES30.glGetUniformLocation(pointProg, "uOutline"), 1.2f * density)
+        GLES30.glUniform3f(GLES30.glGetUniformLocation(pointProg, "uEye"), eye.x.toFloat(), eye.y.toFloat(), eye.z.toFloat())
+        GLES30.glUniform3f(GLES30.glGetUniformLocation(pointProg, "uRight"), view.right.x.toFloat(), view.right.y.toFloat(), view.right.z.toFloat())
+        GLES30.glUniform3f(GLES30.glGetUniformLocation(pointProg, "uUp"), view.up.x.toFloat(), view.up.y.toFloat(), view.up.z.toFloat())
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(pointProg, "uPx"), (1.0 / view.focalPx).toFloat())
+
+        // Per-vertex: the quad's corner.
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, quadVbo2)
+        GLES30.glEnableVertexAttribArray(7)
+        GLES30.glVertexAttribPointer(7, 2, GLES30.GL_FLOAT, false, 8, 0)
+        GLES30.glVertexAttribDivisor(7, 0)
+        // Per-instance: the marker.
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pointVbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, count * stride * 4, floats(a, count * stride), GLES30.GL_STREAM_DRAW)
         val b = stride * 4
-        GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, b, 0)
-        GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 1, GLES30.GL_FLOAT, false, b, 12)
-        GLES30.glEnableVertexAttribArray(2); GLES30.glVertexAttribPointer(2, 3, GLES30.GL_FLOAT, false, b, 16)
-        GLES30.glEnableVertexAttribArray(3); GLES30.glVertexAttribPointer(3, 1, GLES30.GL_FLOAT, false, b, 28)
-        GLES30.glEnableVertexAttribArray(4); GLES30.glVertexAttribPointer(4, 1, GLES30.GL_FLOAT, false, b, 32)
-        GLES30.glEnableVertexAttribArray(5); GLES30.glVertexAttribPointer(5, 1, GLES30.GL_FLOAT, false, b, 36)
-        GLES30.glDrawArrays(GLES30.GL_POINTS, 0, count)
-        for (i in 2..5) GLES30.glDisableVertexAttribArray(i)
+        val attrs = intArrayOf(3, 1, 3, 1, 1, 1, 1) // sizes of locations 0..6
+        var off = 0
+        for ((loc, n) in attrs.withIndex()) {
+            GLES30.glEnableVertexAttribArray(loc)
+            GLES30.glVertexAttribPointer(loc, n, GLES30.GL_FLOAT, false, b, off * 4)
+            GLES30.glVertexAttribDivisor(loc, 1)
+            off += n
+        }
+        GLES30.glDrawArraysInstanced(GLES30.GL_TRIANGLE_STRIP, 0, 4, count)
+        // Other draws read locations 0 and 1 per vertex: undo the instancing state.
+        for (loc in 0..6) GLES30.glVertexAttribDivisor(loc, 0)
+        for (loc in 2..7) GLES30.glDisableVertexAttribArray(loc)
         GLES30.glDepthMask(true)
     }
+
+    private var quadVbo2 = 0
 
     // ---- Lines (orbits, trails) --------------------------------------------------------
 
@@ -671,29 +699,56 @@ void main() {
     outColor = vec4(c.rgb * light, c.a * uAlpha);
 }"""
 
+        /** Above this height a marker is in orbit and faces the screen. */
+        private const val ORBIT_M = 50_000.0
+
         private const val POINT_VS = """#version 300 es
-uniform mat4 uMvp;
+uniform mat4 uMvp;      // projection x view rotation; positions are relative to the eye
+uniform vec3 uEye;      // eye in world metres (float is enough for directions)
+uniform vec3 uRight;    // screen axes in the world, for things in orbit
+uniform vec3 uUp;
+uniform float uPx;      // 1 / focal length in pixels: world size of a pixel at unit distance
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in float aSize;
 layout(location = 2) in vec3 aColor;
 layout(location = 3) in float aRing;
 layout(location = 4) in float aShape;
-layout(location = 5) in float aAngle;
+layout(location = 5) in float aBearing; // radians clockwise from north
+layout(location = 6) in float aBill;    // 1: faces the screen (orbit), 0: lies on the ground
+layout(location = 7) in vec2 aCorner;   // -1..1
 out vec3 vColor;
 out float vRing;
 out float vSize;
 flat out int vShape;
-out vec2 vRot; // cos, sin of the on-screen bearing
+out vec2 vCorner;
 void main() {
-    // Pulled 0.2% toward the eye so a marker sits on top of the surface it marks,
-    // while the far side of the planet still hides it.
-    gl_Position = uMvp * vec4(aPos * 0.998, 1.0);
-    gl_PointSize = aSize;
+    float dist = length(aPos);
+    float hs = aSize * 0.5 * dist * uPx; // half size in metres: same size in pixels at any distance
+    vec3 ax;
+    vec3 ay;
+    vec3 lift = vec3(0.0);
+    if (aBill > 0.5) {
+        ax = uRight;
+        ay = uUp;
+    } else {
+        // Tangent plane at the marker: east and north, turned to its bearing.
+        vec3 n = normalize(aPos + uEye);
+        vec3 east = cross(vec3(0.0, 0.0, 1.0), n);
+        east = length(east) < 1e-6 ? vec3(0.0, 1.0, 0.0) : normalize(east);
+        vec3 north = cross(n, east);
+        float c = cos(aBearing);
+        float s = sin(aBearing);
+        ay = north * c + east * s;   // the shape's "up" points along its bearing
+        ax = east * c - north * s;
+        lift = n * dist * 0.0015;    // just above the ground, never inside it
+    }
+    vec3 p = aPos + lift + (ax * aCorner.x + ay * aCorner.y) * hs;
+    gl_Position = uMvp * vec4(p, 1.0);
     vColor = aColor;
     vRing = aRing;
     vSize = aSize;
     vShape = int(aShape + 0.5);
-    vRot = vec2(cos(aAngle), sin(aAngle));
+    vCorner = aCorner;
 }"""
 
         private const val POINT_FS = """#version 300 es
@@ -703,12 +758,12 @@ in vec3 vColor;
 in float vRing;
 in float vSize;
 flat in int vShape;
-in vec2 vRot;
+in vec2 vCorner;
 out vec4 outColor;
 
 const vec3 DARK = vec3(0.01, 0.02, 0.04);
 
-// Aircraft: an arrow pointing up (+y) in its own frame, with a notch at the tail.
+// Aircraft and ships: an arrow pointing along +y (its bearing), notched at the tail.
 bool plane(vec2 p) {
     if (p.y < -0.6 || p.y > 0.9) return false;
     if (abs(p.x) > 0.55 * (0.9 - p.y) / 1.5) return false;
@@ -716,7 +771,7 @@ bool plane(vec2 p) {
 }
 
 void main() {
-    vec2 c = vec2(gl_PointCoord.x * 2.0 - 1.0, 1.0 - gl_PointCoord.y * 2.0); // y up
+    vec2 c = vCorner;
     float r = length(c) * vSize * 0.5; // distance from centre, px
     float edge = vSize * 0.5;
 
@@ -729,10 +784,8 @@ void main() {
     }
 
     if (vShape == 1) {
-        // Into the arrow's frame: undo the clockwise screen bearing.
-        vec2 p = vec2(vRot.x * c.x - vRot.y * c.y, vRot.y * c.x + vRot.x * c.y);
-        if (plane(p)) { outColor = vec4(vColor, 1.0); return; }
-        if (plane(p * 0.84)) { outColor = vec4(DARK, 0.9); return; }
+        if (plane(c)) { outColor = vec4(vColor, 1.0); return; }
+        if (plane(c * 0.84)) { outColor = vec4(DARK, 0.9); return; }
         discard;
     }
 

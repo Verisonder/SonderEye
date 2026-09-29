@@ -113,6 +113,37 @@ class Settings(context: Context) {
             .apply()
     }
 
+    fun brief(): com.verisonder.sondereye.core.BriefPrefs {
+        val d = com.verisonder.sondereye.core.BriefPrefs()
+        return com.verisonder.sondereye.core.BriefPrefs(
+            sources = prefs.getStringSet("brief.sources", null)?.toSet() ?: d.sources,
+            custom = prefs.getString("brief.custom", "")!!.lines().filter { it.isNotBlank() },
+            stories = prefs.getInt("brief.stories", d.stories),
+            include = prefs.getString("brief.include", d.include) ?: "",
+            exclude = prefs.getString("brief.exclude", d.exclude) ?: "",
+            weather = prefs.getBoolean("brief.weather", d.weather),
+            length = prefs.getInt("brief.length", d.length),
+            language = prefs.getString("brief.language", d.language) ?: d.language,
+            bullets = prefs.getBoolean("brief.bullets", d.bullets),
+            focus = prefs.getString("brief.focus", d.focus) ?: "",
+        )
+    }
+
+    fun saveBrief(b: com.verisonder.sondereye.core.BriefPrefs) {
+        prefs.edit()
+            .putStringSet("brief.sources", b.sources)
+            .putString("brief.custom", b.custom.joinToString("\n"))
+            .putInt("brief.stories", b.stories)
+            .putString("brief.include", b.include)
+            .putString("brief.exclude", b.exclude)
+            .putBoolean("brief.weather", b.weather)
+            .putInt("brief.length", b.length)
+            .putString("brief.language", b.language)
+            .putBoolean("brief.bullets", b.bullets)
+            .putString("brief.focus", b.focus)
+            .apply()
+    }
+
     fun keys() = Keys(
         prefs.getString("key.ais", "") ?: "",
         prefs.getString("key.windy", "") ?: "",

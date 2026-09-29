@@ -47,10 +47,10 @@ object Feeds {
     fun news(src: NewsSource) = Net.get(src.url, "News", src.name) { News.parseRss(src.name, it) }
 
     /** Tries each Gemini model name in turn: names change, the first that exists wins. */
-    fun brief(key: String, stories: List<Story>, weather: String?, place: String?): Net.Outcome<String> {
+    fun brief(key: String, stories: List<Story>, weather: String?, place: String?, prefs: com.verisonder.sondereye.core.BriefPrefs): Net.Outcome<String> {
         var last: Net.Outcome<String> = Net.Outcome.Failed("Brief: no Gemini model answered")
         for (m in Gemini.MODELS) {
-            last = Net.postJson(Gemini.url(m, key), Gemini.request(stories, weather, place), "Brief", "Gemini", Gemini::parse)
+            last = Net.postJson(Gemini.url(m, key), Gemini.request(stories, weather, place, prefs), "Brief", "Gemini", Gemini::parse)
             if (last is Net.Outcome.Ok) return last
             if (last is Net.Outcome.Failed && "HTTP 404" !in last.message) return last
         }
