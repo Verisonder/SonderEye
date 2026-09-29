@@ -25,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.verisonder.sondereye.core.Ais
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Firms
 import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.BriefCache
 import com.verisonder.sondereye.core.BriefPrefs
@@ -191,8 +192,12 @@ class EyeState {
     var shipsProblem by mutableStateOf<String?>(null)
     val webcams = Feed<Webcam>()
     var webcamsNote by mutableStateOf<String?>(null)
+    /** Showing the most popular webcams worldwide (from high up), not those near the centre. */
+    var webcamsWorld by mutableStateOf(false)
     val fires = Feed<Hotspot>()
     var firesNote by mutableStateOf<String?>(null)
+    /** Showing the strongest fires worldwide (from high up), not all of them around the view. */
+    var firesWorld by mutableStateOf(false)
     /** Satellites added by a search, drawn even when their group is not shown. */
     var extraSats by mutableStateOf<List<Sgp4>>(emptyList())
     /** Screen centre and camera, for the position readout: lat, lon, alt, heading. */
@@ -1032,20 +1037,49 @@ class MainActivity : ComponentActivity() {
         val key = state.keys.windy
         if (key.isEmpty()) { state.webcamsNote = "add your Windy key in the menu"; return }
         val c = globe?.center() ?: return
-        state.webcams.attemptAt = System.currentTimeMillis()
-        if (c[2] > WEBCAMS_MAX_ALT) { state.webcamsNote = "zoom in below ${(WEBCAMS_MAX_ALT / 1000).toInt()} km to load them"; webcamArea.centre = null; return }
+        val now = System.currentTimeMillis()
+        state.webcams.attemptAt = now
         state.webcamsNote = null
-        if (force) webcamArea.centre = null
+        if (force) { webcamArea.centre = null; worldWebcams = null }
+        if (c[2] > WEBCAMS_MAX_ALT) {
+            // From high up: the most popular webcams on Earth. Image links expire after 15 min.
+            webcamArea.centre = null
+            val cached = worldWebcams
+            if (cached != null && now - worldWebcamsAt < WORLD_WEBCAMS_MS) {
+                if (!state.webcamsWorld) {
+                    state.webcamsWorld = true
+                    settle(state.webcams, Net.Outcome.Ok(cached to 0), "webcams", ::webcamMarkers)
+                }
+                return
+            }
+            state.webcams.loading = true
+            run("webcams") {
+                val out = withContext(Dispatchers.IO) { Feeds.topWebcams(key, WORLD_WEBCAM_PAGES) }
+                if (out is Net.Outcome.Ok) {
+                    worldWebcams = out.value; worldWebcamsAt = System.currentTimeMillis()
+                    state.webcamsWorld = true
+                }
+                settle(state.webcams, map(out) { it to 0 }, "webcams", ::webcamMarkers)
+            }
+            return
+        }
         val radiusKm = (c[2] * 1.5 / 1000).toInt().coerceIn(5, 250)
         state.webcams.loading = true
         run("webcams") {
             val out = withContext(Dispatchers.IO) { Feeds.webcams(key, c[0], c[1], radiusKm) }
-            if (out is Net.Outcome.Ok) webcamArea.centre = doubleArrayOf(c[0], c[1], radiusKm * 1000.0 / 1.5 * 1.5)
-            settle(state.webcams, map(out) { it to 0 }, "webcams") { list ->
-                list.map { Marker("w:" + it.id, it.lat, it.lon, 13f * density, Palette.webcam.toArgb(), shape = Marker.SHAPE_SAT) }
+            if (out is Net.Outcome.Ok) {
+                webcamArea.centre = doubleArrayOf(c[0], c[1], radiusKm * 1000.0 / 1.5 * 1.5)
+                state.webcamsWorld = false
             }
+            settle(state.webcams, map(out) { it to 0 }, "webcams", ::webcamMarkers)
         }
     }
+
+    private var worldWebcams: List<Webcam>? = null
+    private var worldWebcamsAt = 0L
+
+    private fun webcamMarkers(list: List<Webcam>) =
+        list.map { Marker("w:" + it.id, it.lat, it.lon, 13f * density, Palette.webcam.toArgb(), shape = Marker.SHAPE_SAT) }
 
     // Fire hotspots (last 24 h) in the box around the view.
     private val fireArea = Area()
@@ -1055,23 +1089,51 @@ class MainActivity : ComponentActivity() {
         val key = state.keys.firms
         if (key.isEmpty()) { state.firesNote = "add your NASA FIRMS key in the menu"; return }
         val c = globe?.center() ?: return
-        state.fires.attemptAt = System.currentTimeMillis()
-        if (c[2] > FIRES_MAX_ALT) { state.firesNote = "zoom in below ${(FIRES_MAX_ALT / 1000).toInt()} km to load them"; fireArea.centre = null; return }
+        val now = System.currentTimeMillis()
+        state.fires.attemptAt = now
         state.firesNote = null
-        if (force) fireArea.centre = null
+        if (force) { fireArea.centre = null; worldFires = null }
+        if (c[2] > FIRES_MAX_ALT) {
+            // From high up: the strongest fires on Earth, one download kept for 30 minutes.
+            fireArea.centre = null
+            val cached = worldFires
+            if (cached != null && now - worldFiresAt < WORLD_FIRES_MS) {
+                if (!state.firesWorld) {
+                    state.firesWorld = true
+                    settle(state.fires, Net.Outcome.Ok(cached to 0), "fires", ::fireMarkers)
+                }
+                return
+            }
+            state.fires.loading = true
+            run("fires") {
+                val out = withContext(Dispatchers.IO) { map(Feeds.firesWorld(key)) { Firms.strongest(it, WORLD_FIRES) } }
+                if (out is Net.Outcome.Ok) {
+                    worldFires = out.value; worldFiresAt = System.currentTimeMillis()
+                    state.firesWorld = true
+                }
+                settle(state.fires, map(out) { it to 0 }, "fires", ::fireMarkers)
+            }
+            return
+        }
         val r = c[2] * 1.5
         val b = box(c, r, 30.0)
         state.fires.loading = true
         run("fires") {
             val out = withContext(Dispatchers.IO) { Feeds.fires(key, b[1], b[0], b[3], b[2]) }
-            if (out is Net.Outcome.Ok) fireArea.centre = doubleArrayOf(c[0], c[1], r)
-            settle(state.fires, map(out) { it to 0 }, "fires") { list ->
-                list.map { h ->
-                    val size = (7.0 + kotlin.math.sqrt(h.frpMw ?: 1.0) * 1.6).coerceIn(7.0, 20.0).toFloat() * density
-                    Marker(Sel.OfFire(h).key, h.lat, h.lon, size, Palette.fire.toArgb())
-                }
+            if (out is Net.Outcome.Ok) {
+                fireArea.centre = doubleArrayOf(c[0], c[1], r)
+                state.firesWorld = false
             }
+            settle(state.fires, map(out) { it to 0 }, "fires", ::fireMarkers)
         }
+    }
+
+    private var worldFires: List<Hotspot>? = null
+    private var worldFiresAt = 0L
+
+    private fun fireMarkers(list: List<Hotspot>) = list.map { h ->
+        val size = (7.0 + kotlin.math.sqrt(h.frpMw ?: 1.0) * 1.6).coerceIn(7.0, 20.0).toFloat() * density
+        Marker(Sel.OfFire(h).key, h.lat, h.lon, size, Palette.fire.toArgb())
     }
 
     // ---- Search ---------------------------------------------------------------------------
@@ -1308,6 +1370,11 @@ class MainActivity : ComponentActivity() {
         private const val SHIPS_MAX_ALT = 2_000_000.0
         private const val WEBCAMS_MAX_ALT = 1_000_000.0
         private const val FIRES_MAX_ALT = 6_000_000.0
+        /** Above the limits: the whole Earth, cut to what reads from space. */
+        private const val WORLD_FIRES = 10_000
+        private const val WORLD_FIRES_MS = 30 * 60_000L
+        private const val WORLD_WEBCAM_PAGES = 4 // 200 webcams
+        private const val WORLD_WEBCAMS_MS = 12 * 60_000L // image links last 15 min
         /** Overpass boxes stay small: cameras load only below this height. */
         private const val CAMERAS_MAX_ALT = 60_000.0
         /** Camera height when flying to you: a city and its surroundings. */

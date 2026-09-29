@@ -83,6 +83,11 @@ object Windy {
         "https://api.windy.com/webcams/api/v3/webcams?nearby=" + "%.4f,%.4f,%d".format(Locale.ROOT, lat, lon, radiusKm.coerceIn(1, 250)) +
             "&limit=50&include=images,location,urls"
 
+    /** The most popular webcams on Earth, 50 a page from [offset]: the view from space. */
+    fun topUrl(offset: Int) =
+        "https://api.windy.com/webcams/api/v3/webcams?sortKey=popularity&sortDirection=desc&limit=50&offset=$offset" +
+            "&include=images,location,urls"
+
     fun parse(text: String): List<Webcam> {
         val root = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
         (root["message"] as? String)?.let { if (root["webcams"] == null) throw Json.ParseError(it) }
@@ -122,6 +127,13 @@ object Firms {
     fun url(key: String, w: Double, s: Double, e: Double, n: Double, days: Int = 1) =
         "https://firms.modaps.eosdis.nasa.gov/api/area/csv/" + key.trim() + "/VIIRS_NOAA20_NRT/" +
             "%.3f,%.3f,%.3f,%.3f".format(Locale.ROOT, w, s, e, n) + "/" + days.coerceIn(1, 10)
+
+    /** Every hotspot on Earth: FIRMS takes "world" as the area. */
+    fun worldUrl(key: String, days: Int = 1) =
+        "https://firms.modaps.eosdis.nasa.gov/api/area/csv/" + key.trim() + "/VIIRS_NOAA20_NRT/world/" + days.coerceIn(1, 10)
+
+    /** The [n] most intense: a day of the whole Earth is tens of thousands, mostly faint. */
+    fun strongest(list: List<Hotspot>, n: Int) = list.sortedByDescending { it.frpMw ?: 0.0 }.take(n)
 
     fun parse(text: String): List<Hotspot> {
         val lines = text.lineSequence().filter { it.isNotBlank() }.toList()

@@ -8,6 +8,7 @@ import com.verisonder.sondereye.core.News
 import com.verisonder.sondereye.core.NewsSource
 import com.verisonder.sondereye.core.Story
 import com.verisonder.sondereye.core.ForecastApi
+import com.verisonder.sondereye.core.Webcam
 import com.verisonder.sondereye.core.Windy
 import com.verisonder.sondereye.core.Lookup
 import com.verisonder.sondereye.core.MinMag
@@ -71,8 +72,22 @@ object Feeds {
     fun webcams(key: String, lat: Double, lon: Double, radiusKm: Int) =
         Net.getWith(Windy.url(lat, lon, radiusKm), mapOf("x-windy-api-key" to key.trim()), "Webcams", "Windy", Windy::parse)
 
+    /** The [pages] × 50 most popular webcams worldwide. A page that fails after the first ends the list there. */
+    fun topWebcams(key: String, pages: Int): Net.Outcome<List<Webcam>> {
+        val all = ArrayList<Webcam>()
+        for (p in 0 until pages) {
+            when (val o = Net.getWith(Windy.topUrl(p * 50), mapOf("x-windy-api-key" to key.trim()), "Webcams", "Windy", Windy::parse)) {
+                is Net.Outcome.Ok -> all += o.value
+                is Net.Outcome.Failed -> if (all.isEmpty()) return o else break
+            }
+        }
+        return Net.Outcome.Ok(all.distinctBy { it.id })
+    }
+
     fun fires(key: String, w: Double, s: Double, e: Double, n: Double) =
         Net.get(Firms.url(key, w, s, e, n), "Fires", "NASA FIRMS", Firms::parse)
+
+    fun firesWorld(key: String) = Net.get(Firms.worldUrl(key), "Fires", "NASA FIRMS", Firms::parse)
 
     fun cameras(s: Double, w: Double, n: Double, e: Double) =
         Net.post(Overpass.URL, Overpass.cameraQuery(s, w, n, e), "Cameras", "OpenStreetMap Overpass", Overpass::parseCameras)

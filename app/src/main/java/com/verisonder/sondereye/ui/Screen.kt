@@ -487,11 +487,11 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
         if (l.webcams) {
             any = true
-            LayerLine(Palette.webcam, if (state.webcamsNote != null) "Webcams" else count(state.webcams.items.size, "webcam"), state.webcamsNote ?: "near the centre, Windy") { actions.openList("webcams") }
+            LayerLine(Palette.webcam, if (state.webcamsNote != null) "Webcams" else count(state.webcams.items.size, "webcam"), state.webcamsNote ?: if (state.webcamsWorld) "most popular worldwide, Windy" else "near the centre, Windy") { actions.openList("webcams") }
         }
         if (l.fires) {
             any = true
-            LayerLine(Palette.fire, if (state.firesNote != null) "Fires" else count(state.fires.items.size, "fire hotspot"), state.firesNote ?: "last 24 h, NASA FIRMS") { actions.openList("fires") }
+            LayerLine(Palette.fire, if (state.firesNote != null) "Fires" else count(state.fires.items.size, "fire hotspot"), state.firesNote ?: if (state.firesWorld) "strongest worldwide, last 24 h" else "last 24 h, NASA FIRMS") { actions.openList("fires") }
         }
         state.following?.let { hex ->
             val f = state.flights.items.firstOrNull { it.hex == hex }

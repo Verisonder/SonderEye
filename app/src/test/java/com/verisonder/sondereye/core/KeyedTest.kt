@@ -40,6 +40,14 @@ class KeyedTest {
         assertTrue(Windy.url(35.0, -5.0, 900).contains("nearby=35.0000,-5.0000,250"))
     }
 
+    @Test fun worldViews() {
+        assertTrue(Firms.worldUrl(" k ").endsWith("/api/area/csv/k/VIIRS_NOAA20_NRT/world/1"))
+        val u = Windy.topUrl(100)
+        assertTrue(u, "sortKey=popularity" in u && "sortDirection=desc" in u && "offset=100" in u && "include=images,location,urls" in u)
+        val h = listOf(1.0, null, 30.0, 5.0).mapIndexed { i, f -> Hotspot(i.toDouble(), 0.0, f, null, "", true) }
+        assertEquals(listOf(30.0, 5.0), Firms.strongest(h, 2).map { it.frpMw })
+    }
+
     @Test fun firms() {
         val csv = """latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight
 35.1,-5.3,330.2,0.4,0.5,2026-09-29,142,N20,VIIRS,n,2.0NRT,290.1,5.6,D
