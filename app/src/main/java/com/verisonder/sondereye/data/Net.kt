@@ -82,7 +82,11 @@ object Net {
             if ((code == 401 || code == 403) && hasKey(url, headers)) {
                 return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu", code)
             }
-            if (code == 403) return Outcome.Failed("$what: $source blocked the request (HTTP 403). It may block apps; turn it off in Today, Customise", 403)
+            // Only a news site can be turned off in Today; for the others, just say what happened.
+            if (code == 403) return Outcome.Failed(
+                "$what: $source blocked the request (HTTP 403)" + if (what == "News") ". It may block apps; turn it off in Today, Customise" else "",
+                403,
+            )
             if (code != 200) {
                 val detail = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
                     ?.let { Regex("\"message\"\\s*:\\s*\"([^\"]{1,160})").find(it)?.groupValues?.get(1) }

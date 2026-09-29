@@ -598,7 +598,8 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.roadsProblem)) {
             ErrorLine("$err. Click to retry.", actions.refresh)
         }
-        state.alertProblem?.let { ErrorLine(it, null) }
+        // Pass alerts read the same satellite data: the same failure is said once.
+        state.alertProblem?.takeIf { a -> state.sats.error?.let { a.startsWith(it.substringBefore(" (")) } != true }?.let { ErrorLine(it, null) }
         state.shipsProblem?.let { ErrorLine(it, null) }
         state.meProblem?.let { ErrorLine(it, actions.fixLocation) }
         if (g != null && g.failures > 0) ErrorLine("Imagery: ${g.failures} tiles failed (${g.lastFailure}). Retrying every 20 s.", null)

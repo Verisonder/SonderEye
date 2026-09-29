@@ -265,6 +265,16 @@ object Feeds {
         if (f.exists() && age < 2 * 3_600_000L) {
             runCatching { return Tle.parseAll(f.readText()) to null }
         }
+        // CelesTrak serves each network the same data once every two hours and refuses (403)
+        // the rest: a phone and a PC at home share one network. After a refusal, wait out the
+        // two hours rather than ask again (asking again keeps the block going).
+        val refused = File(cacheDir, "tle-$group.refused")
+        if (refused.exists() && System.currentTimeMillis() - refused.lastModified() < 2 * 3_600_000L) {
+            val stale = if (f.exists()) runCatching { Tle.parseAll(f.readText()) }.getOrNull() else null
+            val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(refused.lastModified() + 2 * 3_600_000L))
+            return stale to "Satellites: CelesTrak allows one download every 2 hours per network; next try after $at" +
+                if (stale != null) ", showing the last copy" else ""
+        }
         return when (val out = Net.get(Sky.celestrakUrl(group), "Satellites", "CelesTrak") { it }) {
             is Net.Outcome.Ok -> {
                 val parsed = Tle.parseAll(out.value)
@@ -278,8 +288,10 @@ object Feeds {
                 }
             }
             is Net.Outcome.Failed -> {
+                if (out.code == 403) runCatching { refused.writeText("") }
                 val stale = if (f.exists()) runCatching { Tle.parseAll(f.readText()) }.getOrNull() else null
-                stale to (out.message + if (stale != null) ", showing the last copy" else "")
+                val why = if (out.code == 403) "Satellites: CelesTrak refused (HTTP 403); it allows one download every 2 hours per network, so the app waits 2 hours" else out.message
+                stale to (why + if (stale != null) ", showing the last copy" else "")
             }
         }
     }
