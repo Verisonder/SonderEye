@@ -302,6 +302,7 @@ class MainActivity : ComponentActivity() {
                             globe?.select(null, fly = false)
                             globe?.home()
                         },
+                        zoomHold = { rate -> globe?.zoomHold(rate) },
                         myLocation = { myLocation() },
                         myLocationClose = { myLocation(ME_CLOSE_ALT) },
                         fixLocation = ::fixLocation,

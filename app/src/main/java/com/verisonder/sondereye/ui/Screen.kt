@@ -32,7 +32,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -146,6 +149,8 @@ class Actions(
     val change: (Layers) -> Unit,
     val select: (Sel?) -> Unit,
     val home: () -> Unit,
+    /** Hold on the Earth key: zoom at this rate (above 0 in, below 0 out); 0 stops. */
+    val zoomHold: (Double) -> Unit,
     val myLocation: () -> Unit,
     /** Long-press on the pin: fly to street level. */
     val myLocationClose: () -> Unit,
@@ -338,7 +343,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             ToolDivider()
             Tool(SkyIcon, "Sky view: point the phone at the sky", false, onClick = actions.sky)
             ToolDivider()
-            Tool(EarthIcon, "Whole Earth: zoom out, north up", false, onClick = actions.home)
+            ZoomKey(onTap = actions.home, onZoom = actions.zoomHold)
         }
 
         AnimatedVisibility(
@@ -803,6 +808,62 @@ private fun Tool(
         Icon(icon, contentDescription = label, tint = if (active) Palette.signal else tint, modifier = Modifier.size(22.dp))
     }
 }
+
+/**
+ * The Earth key. Tap: whole Earth, north up. Hold: zoom in toward the centre for as long
+ * as the finger stays down; sliding it up zooms faster, sliding it down zooms out.
+ */
+@Composable
+private fun ZoomKey(onTap: () -> Unit, onZoom: (Double) -> Unit) {
+    val tap by androidx.compose.runtime.rememberUpdatedState(onTap)
+    val zoom by androidx.compose.runtime.rememberUpdatedState(onZoom)
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var zooming by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .size(48.dp)
+            .background(if (zooming) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    var held = true
+                    val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        val r = waitForUpOrCancellation()
+                        held = false
+                        r
+                    }
+                    if (!held) {
+                        if (up != null) tap() // a scroll of the strip cancels it: no tap then
+                        return@awaitEachGesture
+                    }
+                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    zooming = true
+                    try {
+                        zoom(HOLD_RATE.toDouble())
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            change.consume() // the strip must not scroll under the finger
+                            val upDp = (down.position.y - change.position.y).toDp().value
+                            zoom((HOLD_RATE + upDp / 30f).coerceIn(-3f, 3f).toDouble())
+                        }
+                    } finally {
+                        zoom(0.0)
+                        zooming = false
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            EarthIcon, contentDescription = "Whole Earth. Hold to zoom in, slide down to zoom out",
+            tint = if (zooming) Palette.signal else Palette.text, modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+/** Held Earth key: height shrinks by e every 1.1 s (about half every 0.8 s). */
+private const val HOLD_RATE = 0.9f
 
 @Composable
 private fun ToolDivider() {

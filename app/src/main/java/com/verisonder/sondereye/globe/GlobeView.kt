@@ -137,6 +137,37 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     fun home() = flyTo(CameraState.HOME)
 
+    /**
+     * Zooms toward the centre without stopping, [rate] in e-folds of height per second
+     * (above 0 in, below 0 out), until called again with 0.
+     */
+    fun zoomHold(rate: Double) {
+        zoomRate = rate
+        if (rate == 0.0) {
+            if (animation === zoomer) stopAnimation()
+            return
+        }
+        if (animation !== zoomer) {
+            stopAnimation()
+            zoomAt = System.nanoTime()
+            animation = zoomer
+            postOnAnimation(zoomer)
+        }
+    }
+
+    private var zoomRate = 0.0
+    private var zoomAt = 0L
+    private val zoomer = object : Runnable {
+        override fun run() {
+            if (animation !== this) return
+            val now = System.nanoTime()
+            val dt = ((now - zoomAt) / 1e9).coerceAtMost(0.1) // a stalled frame is not a jump
+            zoomAt = now
+            zoom(exp(zoomRate * dt), width / 2f, height / 2f)
+            postOnAnimation(this)
+        }
+    }
+
     /** The map underneath and the transparent layers over it. */
     fun setMap(base: com.verisonder.sondereye.core.TileSource, overlays: List<com.verisonder.sondereye.core.TileSource>) {
         renderer.base = base
