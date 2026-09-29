@@ -531,7 +531,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
             LayerLine(
                 Palette.conflict,
                 if (c.loading && c.updatedAt == null) "Loading conflicts…" else count(c.items.size, "place in conflict news", "places in conflict news"),
-                state.conflictsSavedAt?.let { "saved at ${clock(it)}, GDELT is down" } ?: "last 24 h, GDELT",
+                "last ${state.conflictsHours.coerceAtLeast(1)} h of the news, GDELT",
                 onOpen = { actions.openList("conflicts") },
             )
         }
@@ -1148,7 +1148,7 @@ private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Un
 
 @Composable
 private fun ColumnScope.ConflictBody(c: Conflict, context: Context, onClose: () -> Unit) {
-    Header(null, Palette.conflict, c.name, if (c.count == 1) "1 article about fighting, last 24 h" else "${c.count} articles about fighting, last 24 h", onClose, Sym.DOT)
+    Header(null, Palette.conflict, c.name, if (c.count == 1) "1 article about fighting" else "${c.count} articles about fighting", onClose, Sym.DOT)
     // The stories themselves: what the pin is based on.
     for (a in c.articles.take(5)) {
         Row(
@@ -1159,7 +1159,7 @@ private fun ColumnScope.ConflictBody(c: Conflict, context: Context, onClose: () 
             Text("›", color = Palette.signal, fontSize = 18.sp, modifier = Modifier.padding(start = 6.dp, end = 10.dp))
         }
     }
-    Line("Named in news tagged as armed conflict by GDELT. What the news says, not a verified event.")
+    Line("Fighting reported in the news (assaults, clashes, mass violence), read by GDELT. What the news says, not a verified event.")
 }
 
 @Composable
@@ -1763,7 +1763,7 @@ private fun LayersPanel(
             Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
 
             Divider()
-            Section("Conflicts", "Places the news reports fighting in, last 24 h (GDELT)", s.conflicts) { change(s.copy(conflicts = it)) }
+            Section("Conflicts", "Places the news reports fighting in, up to a day back (GDELT)", s.conflicts) { change(s.copy(conflicts = it)) }
 
             Divider()
             Section("Bus lines", "Routes and stops from OpenStreetMap; load below 40 km", s.busLines) { change(s.copy(busLines = it)) }

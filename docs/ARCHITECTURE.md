@@ -13,7 +13,7 @@ app/src/main/java/com/verisonder/sondereye/
     Roads.kt    Street-level roads (Esri hides its road lines up close), built into
                 screen-width ribbons for the GPU.
     Mvt.kt      Reads the roads out of OpenFreeMap's vector tiles (Mapbox Vector Tile format).
-    Conflicts.kt  Places in armed-conflict news (GDELT GEO 2.0) and their stories.
+    Conflicts.kt  Places in the news for fighting, from GDELT's 15-minute event files, and their stories.
     Transit.kt  Bus lines and stops (Overpass), live buses: Transitland lookups, GTFS Realtime
                 as JSON and as protocol buffer (a small reader for the fields a map needs).
   alerts/

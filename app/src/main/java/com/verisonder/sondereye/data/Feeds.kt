@@ -91,9 +91,30 @@ object Feeds {
         return Net.Outcome.Ok(all.distinctBy { it.id })
     }
 
-    /** The day's conflict places; a good answer is also saved to [saveTo] for when GDELT is down. */
-    fun conflicts(saveTo: java.io.File? = null) = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT") { t ->
-        com.verisonder.sondereye.core.Gdelt.parse(t).also { saveTo?.let { f -> runCatching { f.writeText(t) } } }
+    /** The newest GDELT events file (HTTPS first; its file server may only answer plain HTTP). */
+    fun gdeltLatest(): Net.Outcome<String> {
+        val o = Net.get(com.verisonder.sondereye.core.GdeltEvents.LAST_UPDATE, "Conflicts", "GDELT", com.verisonder.sondereye.core.GdeltEvents::latestExport)
+        return if (o is Net.Outcome.Ok) o
+        else Net.get(com.verisonder.sondereye.core.GdeltEvents.LAST_UPDATE_PLAIN, "Conflicts", "GDELT", com.verisonder.sondereye.core.GdeltEvents::latestExport)
+    }
+
+    /**
+     * The fighting in one 15-minute GDELT events file, kept on the phone (a file never
+     * changes once published, so it is downloaded once).
+     */
+    fun gdeltSlice(cacheDir: java.io.File, url: String): Net.Outcome<List<com.verisonder.sondereye.core.GdeltEvents.Event>> {
+        val ev = com.verisonder.sondereye.core.GdeltEvents
+        val f = java.io.File(cacheDir, "gdelt/" + ev.stampOf(url) + ".tsv")
+        if (f.exists()) runCatching { return Net.Outcome.Ok(ev.decode(f.readText())) }
+        var last: Net.Outcome.Failed? = null
+        for (u in listOf(url.replace("http://", "https://"), url).distinct()) {
+            val o = Net.getBytes(u, "Conflicts", "GDELT") { zip ->
+                ev.parseZip(zip).also { runCatching { f.parentFile?.mkdirs(); f.writeText(ev.encode(it)) } }
+            }
+            if (o is Net.Outcome.Ok) return o
+            last = o as Net.Outcome.Failed
+        }
+        return last!!
     }
 
     /**
@@ -112,15 +133,17 @@ object Feeds {
     private fun <T> overpass(body: String, what: String, slow: Boolean, parse: (String) -> T): Net.Outcome<T> {
         overpassTurn.lock()
         try {
-            var last: Net.Outcome.Failed? = null
+            var first: Net.Outcome.Failed? = null
             for (url in OVERPASS_SERVERS) {
                 val o = if (slow) Net.postSlow(url, body, what, "OpenStreetMap Overpass", parse)
                 else Net.post(url, body, what, "OpenStreetMap Overpass", parse)
                 if (o is Net.Outcome.Ok) return o
-                last = o as Net.Outcome.Failed
-                if (o.code == 400) return o
+                val f = o as Net.Outcome.Failed
+                if (f.code == 400) return f
+                if (first == null) first = f
             }
-            return last!!
+            // The main server's own answer says most; the backups only failed after it.
+            return Net.Outcome.Failed(first!!.message + " (the backup servers failed too)", first.code)
         } finally {
             overpassTurn.unlock()
         }

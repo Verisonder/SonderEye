@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Everything over HTTPS, except GDELT's file server, which may only answer over plain HTTP.
+     It serves public news-event files; nothing personal is sent to it. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">data.gdeltproject.org</domain>
+    </domain-config>
+</network-security-config>

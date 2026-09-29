@@ -220,8 +220,8 @@ class EyeState {
     var worldError by mutableStateOf<String?>(null)
     /** Places in the news for fighting, last 24 h (GDELT). */
     val conflicts = Feed<Conflict>()
-    /** When the conflicts shown were saved, while GDELT is not answering (null: they are live). */
-    var conflictsSavedAt by mutableStateOf<Long?>(null)
+    /** How many hours of GDELT's event files the conflict pins cover (they build up to a day). */
+    var conflictsHours by mutableStateOf(0)
     /** Bus lines (one per direction) and their stops, OpenStreetMap. */
     val busLines = Feed<BusLine>()
     var busStops by mutableStateOf<List<BusStop>>(emptyList())
@@ -1069,25 +1069,36 @@ class MainActivity : ComponentActivity() {
         if (!state.layers.conflicts) return clear(state.conflicts, "conflicts", "x:")
         state.conflicts.loading = true
         state.conflicts.attemptAt = System.currentTimeMillis()
-        val file = java.io.File(cacheDir, "conflicts.json")
         run("conflicts") {
-            val out = withContext(Dispatchers.IO) { Feeds.conflicts(saveTo = file) }
-            if (out is Net.Outcome.Failed && state.conflicts.items.isEmpty()) {
-                // GDELT's map service goes away now and then (it answers 404 meanwhile): show the
-                // last list it gave, if it is from the last day, and keep saying it is down.
-                val saved = withContext(Dispatchers.IO) {
-                    if (file.exists() && System.currentTimeMillis() - file.lastModified() < 24 * 3_600_000L)
-                        runCatching { com.verisonder.sondereye.core.Gdelt.parse(file.readText()) }.getOrNull() else null
-                }
-                if (saved != null) {
-                    settle(state.conflicts, Net.Outcome.Ok(saved to 0), "conflicts", ::conflictMarkers)
-                    state.conflictsSavedAt = file.lastModified()
-                    state.conflicts.error = "Conflicts: GDELT is not answering (${out.message.substringAfter("answered ", "error")}); showing its list from ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(file.lastModified()))}"
-                    return@run
-                }
+            val ev = com.verisonder.sondereye.core.GdeltEvents
+            val latest = withContext(Dispatchers.IO) { Feeds.gdeltLatest() }
+            if (latest !is Net.Outcome.Ok) {
+                state.conflicts.loading = false
+                state.conflicts.error = (latest as Net.Outcome.Failed).message
+                return@run
             }
-            if (out is Net.Outcome.Ok) state.conflictsSavedAt = null
-            settle(state.conflicts, map(out) { it to 0 }, "conflicts", ::conflictMarkers)
+            // The day's files: those already on the phone, and the newest few that are not.
+            val day = ev.lastFiles(latest.value, CONFLICT_DAY_FILES)
+            val dir = java.io.File(cacheDir, "gdelt")
+            val have = dir.list()?.toSet() ?: emptySet()
+            val keep = day.map { ev.stampOf(it) + ".tsv" }.toSet()
+            withContext(Dispatchers.IO) { have.filter { it !in keep }.forEach { java.io.File(dir, it).delete() } }
+            val wanted = day.filter { ev.stampOf(it) + ".tsv" in have } + day.take(CONFLICT_NEW_FILES).filter { ev.stampOf(it) + ".tsv" !in have }
+            val results = withContext(Dispatchers.IO) {
+                wanted.distinct().map { u -> async { Feeds.gdeltSlice(cacheDir, u) } }.map { it.await() }
+            }
+            val ok = results.filterIsInstance<Net.Outcome.Ok<List<com.verisonder.sondereye.core.GdeltEvents.Event>>>()
+            val failed = results.filterIsInstance<Net.Outcome.Failed>()
+            state.conflictsHours = (ok.size * 15 + 59) / 60
+            if (ok.isEmpty() && failed.isNotEmpty()) {
+                state.conflicts.loading = false
+                state.conflicts.error = failed.first().message
+                return@run
+            }
+            val places = withContext(Dispatchers.Default) { ev.places(ok.flatMap { it.value }) }
+            settle(state.conflicts, Net.Outcome.Ok(places to 0), "conflicts", ::conflictMarkers)
+            // Some files missing: the rest show, and the next round tries again.
+            if (failed.isNotEmpty()) state.conflicts.error = "${failed.first().message} (${failed.size} of ${results.size} files)"
         }
     }
 
@@ -1815,6 +1826,9 @@ class MainActivity : ComponentActivity() {
         private const val BUSES_MS = 30_000L
         /** GDELT updates every 15 minutes. */
         private const val CONFLICTS_MS = 15 * 60_000L
+        /** A day of GDELT's 15-minute event files; the first time, only the newest few (about a MB each). */
+        private const val CONFLICT_DAY_FILES = 96
+        private const val CONFLICT_NEW_FILES = 8
         private const val BUSES_MAX = 3_000
         private const val BUS_FEEDS_RADIUS_M = 10_000
         private const val BUS_FEEDS_MOVE_M = 30_000.0
