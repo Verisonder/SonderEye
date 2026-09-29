@@ -151,6 +151,19 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     fun home() = flyTo(CameraState.HOME)
 
     /**
+     * The opening shot: from deep space, a third of the way round the planet, the globe
+     * swings in to where the view is now. Touching the globe first cancels it.
+     */
+    fun intro(delayMs: Long, flyMs: Long) {
+        val target = cam
+        setCam(target.copy(lon = target.lon + 130.0, lat = target.lat - 15.0, alt = CameraState.MAX_ALT))
+        introPending = true
+        postDelayed({ if (introPending && animation == null) flyTo(target, flyMs); introPending = false }, delayMs)
+    }
+
+    private var introPending = false
+
+    /**
      * Zooms toward the centre without stopping, [rate] in e-folds of height per second
      * (above 0 in, below 0 out), until called again with 0.
      */
@@ -360,6 +373,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        introPending = false
         if (e.actionMasked == MotionEvent.ACTION_DOWN) stopAnimation()
         // Long hold: armed on one finger down; any movement, second finger or lift cancels it.
         when (e.actionMasked) {

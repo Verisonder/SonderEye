@@ -435,6 +435,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys, state.allCredits)
             }
         }
+
+        // Over everything, only when the app has just been opened.
+        if (state.booting) BootSequence { state.booting = false }
     }
 }
 
@@ -1779,6 +1782,7 @@ private fun LayersPanel(
 
             Divider()
             Toggle("Light panels", s.lightPanels, true) { change(s.copy(lightPanels = it)) }
+            Toggle("Start-up animation", s.bootAnimation, true) { change(s.copy(bootAnimation = it)) }
             Toggle("Show map credits", s.credits, true) { change(s.copy(credits = it)) }
             Text(
                 "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +

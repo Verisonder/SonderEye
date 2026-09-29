@@ -226,6 +226,8 @@ class EyeState {
     var busLinesNote by mutableStateOf<String?>(null)
     /** Why the street-level roads could not load, if they could not. */
     var roadsProblem by mutableStateOf<String?>(null)
+    /** The start-up sequence is on screen. */
+    var booting by mutableStateOf(false)
     /** Live buses, and what the legend says about where they come from. */
     val buses = Feed<Bus>()
     var busesNote by mutableStateOf<String?>(null)
@@ -320,6 +322,11 @@ class MainActivity : ComponentActivity() {
             for (name in listOf("fires", "quakes", "conflicts", "events", "cameras", "busStops", "buses", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
             globe?.northLocked = state.layers.northLock
+            // A fresh start (not a rotation): the start-up sequence, and the globe flying in behind it.
+            if (savedInstanceState == null && state.layers.bootAnimation) {
+                state.booting = true
+                globe?.intro(delayMs = BOOT_FLY_DELAY_MS, flyMs = BOOT_FLY_MS)
+            }
         } else {
             state.globeError = "Globe: this phone reports OpenGL ES ${gl shr 16}.${gl and 0xFFFF}; 3.0 is required"
         }
@@ -1745,6 +1752,9 @@ class MainActivity : ComponentActivity() {
         private const val ROADS_VECTOR_ALT = 3_500.0
         private const val ROAD_LIFT_M = 2.0
         private const val BUS_LINES_MAX_ALT = 40_000.0
+        /** The globe starts its fly-in under the start-up screen and lands after it fades. */
+        private const val BOOT_FLY_DELAY_MS = 1_100L
+        private const val BOOT_FLY_MS = 2_300L
         private const val BUS_STOPS_MAX_ALT = 12_000.0
         private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it
         private const val BUS_FLY_ALT = 8_000.0
