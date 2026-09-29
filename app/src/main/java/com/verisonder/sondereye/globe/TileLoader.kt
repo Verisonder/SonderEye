@@ -103,6 +103,10 @@ class TileLoader(
                 throw Failure("not an image (${bytes.size} bytes)")
             }
             failedAt.remove(t)
+            if (t.source.emptyIsMissing && isEmpty(bmp)) {
+                bmp.recycle()
+                return onAbsent(t)
+            }
             holding = false // the place now belongs to the queued bitmap until uploaded()
             onLoaded(t, bmp)
         } catch (e: Failure) {
@@ -123,6 +127,18 @@ class TileLoader(
             inFlight.remove(t)
             if (lastWanted.size > 20_000) prune()
         }
+    }
+
+    /** Every pixel fully transparent. All of them: a road can be a single pixel wide. */
+    private fun isEmpty(bmp: Bitmap): Boolean {
+        if (!bmp.hasAlpha()) return false
+        val w = bmp.width
+        val row = IntArray(w)
+        for (y in 0 until bmp.height) {
+            bmp.getPixels(row, 0, w, 0, y, w, 1)
+            for (p in row) if (p ushr 24 != 0) return false
+        }
+        return true
     }
 
     /** Bookkeeping maps otherwise grow with every tile ever seen. */

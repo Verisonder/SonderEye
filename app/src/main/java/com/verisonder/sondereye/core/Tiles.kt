@@ -17,6 +17,11 @@ class TileSource(
     val bundled: Boolean = false,
     /** Drawn only on the night side, brightness as opacity (city lights). */
     val night: Boolean = false,
+    /**
+     * An empty (fully transparent) tile means the source has no data this deep, not an
+     * empty place: treated like a 404, so the level above is stretched over it.
+     */
+    val emptyIsMissing: Boolean = false,
     private val template: (z: Int, x: Int, y: Int) -> String,
 ) {
     fun url(k: TileKey) = template(k.z, k.x, k.y)
@@ -61,7 +66,7 @@ class TileSource(
             "https://gibs-" + "abc"[(x + y) % 3] + ".earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/GoogleMapsCompatible_Level8/$z/$y/$x.jpg"
         }
 
-        val ROADS = TileSource("esri-roads", 19, true, "Roads: Esri", template = esri("Reference/World_Transportation"))
+        val ROADS = TileSource("esri-roads", 19, true, "Roads: Esri", emptyIsMissing = true, template = esri("Reference/World_Transportation"))
         val LABELS = TileSource("esri-labels", 19, true, "Labels: Esri", template = esri("Reference/World_Boundaries_and_Places"))
 
         /** RainViewer radar, past 10-minute frame. [path] comes from their weather-maps.json. */
