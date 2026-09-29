@@ -49,6 +49,7 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
     val mouse = remember { MouseState() }
     // Drawing paths reused frame after frame: a new one each time is native memory Java is slow to give back.
     val scratch = remember { Scratch() }
+    val lineCache = remember { LineCache() }
     Canvas(
         modifier
             .fillMaxSize()
@@ -136,7 +137,7 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
         if (g.hold) return@Canvas
         drawGlow(v)
         drawIntoCanvas { painter.draw(it.nativeCanvas, v, g.density) }
-        drawLines(v, g.lines, scratch)
+        drawLines(v, g.lines, lineCache)
         g.highlight?.let { hl -> drawIntoCanvas { painter.drawRoads(it.nativeCanvas, v, g.density, hl) } }
         drawMarkers(v, g.markers, g.selectedKey, g.density, scratch)
     }
@@ -195,36 +196,92 @@ internal fun visible(v: View, p: V3): Boolean {
     return t < 0 || t > dist
 }
 
-private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>, scratch: Scratch) {
-    for (l in lines) {
-        val color = Color(l.rgb).copy(alpha = l.alpha)
-        val path = scratch.a
-        path.reset()
-        var open = false
-        var any = false
-        if (l.pairs) {
-            var i = 0
-            while (i + 1 < l.points.size) {
-                val a = l.points[i]
-                val b = l.points[i + 1]
-                i += 2
-                if (!visible(v, a) || !visible(v, b)) continue
-                val pa = v.project(a) ?: continue
-                val pb = v.project(b) ?: continue
-                path.moveTo(pa[0].toFloat(), pa[1].toFloat())
-                path.lineTo(pb[0].toFloat(), pb[1].toFloat())
-                any = true
-            }
-        } else {
-            for (p in l.points) {
-                val s = if (visible(v, p)) v.project(p) else null
-                if (s == null) { open = false; continue }
-                if (!open) path.moveTo(s[0].toFloat(), s[1].toFloat()) else path.lineTo(s[0].toFloat(), s[1].toFloat())
-                open = true
-                any = true
+/**
+ * Lines (bus routes, trails, orbits). A city's bus network is tens of thousands of segments,
+ * so: lines of one colour go into one path, points are projected without allocating, the
+ * far side and off-screen segments are skipped, and the paths are kept while the camera and
+ * the lines stay the same (the globe also redraws for other reasons, every second).
+ */
+private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>, cache: LineCache) {
+    if (cache.cam != v.cam || cache.w != v.width || cache.h != v.height || cache.lines !== lines) {
+        cache.rebuild(v, lines)
+    }
+    for ((color, path) in cache.paths) drawPath(path, color, style = Stroke(width = 2f, cap = StrokeCap.Round))
+}
+
+internal class LineCache {
+    var cam: com.verisonder.sondereye.core.CameraState? = null
+    var w = 0
+    var h = 0
+    var lines: List<GlobeLine>? = null
+    var paths: List<Pair<Color, Path>> = emptyList()
+    private val pool = ArrayList<Path>()
+
+    private var sx = 0f
+    private var sy = 0f
+
+    /** Screen position of world point (x, y, z) into [sx], [sy]; false when not seen. */
+    private fun project(v: View, x: Double, y: Double, z: Double): Boolean {
+        val e = v.eye
+        val r2 = x * x + y * y + z * z
+        val pe = x * e.x + y * e.y + z * e.z
+        if (r2 < ORBIT2) {
+            if (pe <= r2) return false // beyond the horizon
+        } else if (!visible(v, V3(x, y, z))) return false
+        val dx = x - e.x
+        val dy = y - e.y
+        val dz = z - e.z
+        val f = v.forward
+        val d = dx * f.x + dy * f.y + dz * f.z
+        if (d <= 0) return false
+        val r = v.right
+        val u = v.up
+        sx = (v.width / 2.0 + (dx * r.x + dy * r.y + dz * r.z) / d * v.focalPx).toFloat()
+        sy = (v.height / 2.0 - (dx * u.x + dy * u.y + dz * u.z) / d * v.focalPx).toFloat()
+        return true
+    }
+
+    private fun off(x: Float, y: Float) = x < -100 || y < -100 || x > w + 100 || y > h + 100
+
+    fun rebuild(v: View, list: List<GlobeLine>) {
+        cam = v.cam; w = v.width; h = v.height; lines = list
+        val groups = LinkedHashMap<Long, Path>()
+        var used = 0
+        fun pathFor(key: Long): Path = groups.getOrPut(key) {
+            (if (used < pool.size) pool[used] else Path().also { pool.add(it) }).also { used++; it.reset() }
+        }
+        for (l in list) {
+            val key = (l.rgb.toLong() shl 8) or (l.alpha * 255).toLong()
+            val path = pathFor(key)
+            val pts = l.points
+            if (l.pairs) {
+                var i = 0
+                while (i + 1 < pts.size) {
+                    val a = pts[i]
+                    val b = pts[i + 1]
+                    i += 2
+                    if (!project(v, a.x, a.y, a.z)) continue
+                    val ax = sx
+                    val ay = sy
+                    if (!project(v, b.x, b.y, b.z)) continue
+                    if (off(ax, ay) && off(sx, sy)) continue
+                    path.moveTo(ax, ay)
+                    path.lineTo(sx, sy)
+                }
+            } else {
+                var open = false
+                for (p in pts) {
+                    if (!project(v, p.x, p.y, p.z)) { open = false; continue }
+                    if (!open) path.moveTo(sx, sy) else path.lineTo(sx, sy)
+                    open = true
+                }
             }
         }
-        if (any) drawPath(path, color, style = Stroke(width = 2f, cap = StrokeCap.Round))
+        paths = groups.map { (k, p) -> Color(((k shr 8).toInt()) or (0xFF shl 24)).copy(alpha = (k and 0xFF) / 255f) to p }
+    }
+
+    companion object {
+        private const val ORBIT2 = (EARTH_R + 50_000.0) * (EARTH_R + 50_000.0)
     }
 }
 

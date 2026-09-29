@@ -48,6 +48,10 @@ class Painter(private val g: GlobeView) {
     }
     private val indexCache = HashMap<Int, ShortArray>()
     private val used = HashSet<SourcedTile>()
+    private val projected = HashMap<TileKey, Projected?>()
+    private var projCam: CameraState? = null
+    private var projW = 0
+    private var projH = 0
     private var lastStatus: GlobeStatus? = null
 
     private val texPaint = Paint().apply { isAntiAlias = false }
@@ -73,7 +77,11 @@ class Painter(private val g: GlobeView) {
         val list = TileSelect.select(v, GlobeRenderer.MAX_ZOOM, SPLIT_PX, TILE_LIMIT).sortedByDescending { k ->
             v.project(k.center())?.let { (it[0] - cx) * (it[0] - cx) + (it[1] - cy) * (it[1] - cy) } ?: Double.MAX_VALUE
         }
-        val projected = HashMap<TileKey, Projected?>()
+        // Kept while the camera stays put: the globe also redraws when markers move (every second).
+        if (v.cam != projCam || v.width != projW || v.height != projH) {
+            projected.clear()
+            projCam = v.cam; projW = v.width; projH = v.height
+        }
         fun proj(k: TileKey) = projected.getOrPut(k) { project(k, v) }
 
         val shading = g.dayNight
