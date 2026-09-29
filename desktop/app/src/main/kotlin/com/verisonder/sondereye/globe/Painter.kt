@@ -327,45 +327,18 @@ class Painter(private val g: GlobeView) {
         return false
     }
 
-    private val roadPaint = Paint().apply {
-        isAntiAlias = true
-        mode = PaintMode.STROKE
-        strokeCap = PaintStrokeCap.ROUND
-        strokeJoin = PaintStrokeJoin.ROUND
-    }
+    private val roadDrawer = RoadDrawer()
+    private val highlightDrawer = RoadDrawer()
 
-    /** Roads (or a picked bus route): each class a stroked path, fixed width on screen. */
+    /** Street roads. */
     fun drawRoads(c: Canvas, v: View, density: Float, set: RoadSet?) {
-        if (set == null) return
-        val segs = set.segments
-        for (p in set.passes) {
-            val s = segs.getOrNull(p.index) ?: continue
-            if (s.isEmpty()) continue
-            val path = Path()
-            var n = 0
-            var i = 0
-            while (i + 5 < s.size) {
-                val a = V3(s[i], s[i + 1], s[i + 2])
-                val b = V3(s[i + 3], s[i + 4], s[i + 5])
-                i += 6
-                if (!v.aboveHorizon(a) && !v.aboveHorizon(b)) continue
-                val pa = v.project(a) ?: continue
-                val pb = v.project(b) ?: continue
-                if (offscreen(pa, v) && offscreen(pb, v)) continue
-                path.moveTo(pa[0].toFloat(), pa[1].toFloat())
-                path.lineTo(pb[0].toFloat(), pb[1].toFloat())
-                n++
-            }
-            if (n == 0) { path.close(); continue }
-            roadPaint.color = (((p.alpha * 255).toInt() shl 24) or p.rgb)
-            roadPaint.strokeWidth = p.widthDp * density
-            c.drawPath(path, roadPaint)
-            path.close()
-        }
+        if (set != null) roadDrawer.draw(c, v, density, set)
     }
 
-    private fun offscreen(p: DoubleArray, v: View) =
-        p[0] < -200 || p[1] < -200 || p[0] > v.width + 200 || p[1] > v.height + 200
+    /** A picked bus route, over everything but the markers. */
+    fun drawHighlight(c: Canvas, v: View, density: Float, set: RoadSet?) {
+        if (set != null) highlightDrawer.draw(c, v, density, set)
+    }
 
     companion object {
         private const val SPLIT_PX = 512.0

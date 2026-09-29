@@ -138,7 +138,7 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
         drawGlow(v)
         drawIntoCanvas { painter.draw(it.nativeCanvas, v, g.density) }
         drawLines(v, g.lines, lineCache)
-        g.highlight?.let { hl -> drawIntoCanvas { painter.drawRoads(it.nativeCanvas, v, g.density, hl) } }
+        g.highlight?.let { hl -> drawIntoCanvas { painter.drawHighlight(it.nativeCanvas, v, g.density, hl) } }
         drawMarkers(v, g.markers, g.selectedKey, g.density, scratch)
     }
 }
