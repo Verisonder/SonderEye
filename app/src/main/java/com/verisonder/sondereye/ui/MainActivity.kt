@@ -511,6 +511,8 @@ class MainActivity : ComponentActivity() {
     private fun refreshAll() {
         loadQuakes(); loadFlights(); loadSatellites(); loadEvents(); loadRadar()
         if (state.layers.conflicts) loadConflicts()
+        // Where you are, fresh: a new fix now rather than the last one kept.
+        if (state.layers.location && hasLocationPermission()) where.refresh()
         val w = state.weather
         if (w != null) state.selected?.let { loadWeather(it) }
     }

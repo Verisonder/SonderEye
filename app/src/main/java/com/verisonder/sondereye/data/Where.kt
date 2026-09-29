@@ -5,6 +5,7 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
 import android.os.Looper
 
 /**
@@ -12,7 +13,7 @@ import android.os.Looper
  * no Google Play services. Runs only between [start] and [stop] (while the app is on
  * screen and location is switched on in the app).
  */
-class Where(context: Context, private val onFix: (Location) -> Unit, private val onProblem: (String) -> Unit) {
+class Where(private val context: Context, private val onFix: (Location) -> Unit, private val onProblem: (String) -> Unit) {
     private val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var running = false
 
@@ -41,6 +42,35 @@ class Where(context: Context, private val onFix: (Location) -> Unit, private val
                 // Provider missing on this phone; the other one still works.
             }
         }
+    }
+
+    /**
+     * Asks every provider for a new fix now, instead of waiting for the next update (which
+     * only comes after moving 10 m). Starts the updates too, if they were not running.
+     */
+    @SuppressLint("MissingPermission")
+    fun refresh() {
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        if (providers.isEmpty()) {
+            onProblem("Location: switched off in the phone's settings")
+            return
+        }
+        for (p in providers) {
+            try {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    lm.getCurrentLocation(p, null, context.mainExecutor) { loc -> if (loc != null) onFix(loc) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    lm.requestSingleUpdate(p, listener, Looper.getMainLooper())
+                }
+            } catch (e: SecurityException) {
+                onProblem("Location: permission was withdrawn")
+            } catch (e: IllegalArgumentException) {
+                // Provider missing on this phone; the other one still answers.
+            }
+        }
+        start()
     }
 
     fun stop() {
