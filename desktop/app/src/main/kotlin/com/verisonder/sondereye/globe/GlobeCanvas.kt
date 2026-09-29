@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.onPointerEvent
@@ -112,9 +113,20 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
             }
             .onPointerEvent(PointerEventType.Scroll) { e ->
                 val ch = e.changes.first()
+                val d = ch.scrollDelta
+                val p = ch.position
                 g.pressed()
                 g.moved()
-                g.zoom(exp(-ch.scrollDelta.y * 0.22).toDouble(), ch.position.x, ch.position.y)
+                // A touchpad pinch arrives as Ctrl + scroll: zoom. A touchpad's two-finger slide
+                // arrives as fine or sideways scrolling: move the map with the fingers. A mouse
+                // wheel turns in whole notches, straight up or down: zoom.
+                val pinch = e.keyboardModifiers.isCtrlPressed
+                val wheel = d.x == 0f && d.y != 0f && d.y == kotlin.math.round(d.y)
+                if (pinch || wheel) {
+                    g.zoom(exp(-d.y * if (pinch) 0.12f else 0.22f).toDouble(), p.x, p.y)
+                } else {
+                    g.drag(p.x, p.y, p.x - d.x * SLIDE_PX, p.y - d.y * SLIDE_PX)
+                }
             },
     ) {
         // Reading the state here makes the canvas draw again when any of it changes.
@@ -129,6 +141,9 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
         drawMarkers(v, g.markers, g.selectedKey, g.density, scratch)
     }
 }
+
+/** Pixels the map moves per unit of touchpad scrolling. */
+private const val SLIDE_PX = 40f
 
 private class Scratch {
     val a = Path()
