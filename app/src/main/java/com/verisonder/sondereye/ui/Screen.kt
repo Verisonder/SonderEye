@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -215,6 +216,10 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         // An open panel takes the space; the legend and readout step aside rather than show under it.
         // In the clean view everything steps aside.
         val panelOpen = state.layersOpen || state.search.open || state.brief.open || state.listLayer != null || hidden
+        // A selected thing's card sits where the readout is; sideways the screen is too short
+        // for the card and the legend both, so the legend steps aside until the card closes.
+        val cardOpen = state.selected != null
+        val sideways = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
         if (hidden) {
             // The only control left: a small tab on the right edge that brings everything back.
@@ -233,7 +238,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
-        if (!panelOpen) Column(
+        if (!panelOpen && !cardOpen) Column(
             Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
@@ -248,7 +253,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
         }
 
-        if (!panelOpen) Legend(
+        if (!panelOpen && !(cardOpen && sideways)) Legend(
             state, actions,
             Modifier
                 .align(Alignment.TopStart)
@@ -922,9 +927,10 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
     Surface(
         color = Palette.panel,
         shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
+        modifier = Modifier.border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
     ) {
-        Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
+        // As wide as its longest line (up to the card's limit), not the whole limit.
+        Column(Modifier.widthIn(min = 260.dp).width(IntrinsicSize.Max).padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
             when (sel) {
                 is Sel.OfQuake -> QuakeBody(sel.q, now, context, close)
                 is Sel.OfFlight -> FlightBody(sel.f, state, actions, context, close)
