@@ -12,13 +12,26 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
 /** SonderEye for Windows: one window, the globe and everything on it, as on the phone. */
-fun main() = application {
+fun main() {
+    // A crash leaves its story in %LOCALAPPDATA%\SonderEye\files\crash.log.
+    Thread.setDefaultUncaughtExceptionHandler { t, e ->
+        runCatching {
+            java.io.File(AppDirs.files, "crash.log").appendText(
+                "${java.time.Instant.now()} on ${t.name}: ${e.stackTraceToString()}\n",
+            )
+        }
+    }
+    window()
+}
+
+private fun window() = application {
     val app = remember { arrayOfNulls<MainActivity>(1) }
     val window = rememberWindowState(width = 1440.dp, height = 900.dp)
     Window(
@@ -33,7 +46,9 @@ fun main() = application {
         onPreviewKeyEvent = { e -> e.type == KeyEventType.KeyDown && e.key == Key.Escape && Back.press() },
     ) {
         val scope = rememberCoroutineScope()
-        val density = LocalDensity.current.density
+        // The phone's layout, a quarter larger: a PC screen is further from the eye.
+        val base = LocalDensity.current
+        val density = base.density * UI_SCALE
         val controller = remember {
             MainActivity(scope, density).also {
                 it.start(fresh = true)
@@ -41,9 +56,15 @@ fun main() = application {
             }
         }
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            CompositionLocalProvider(LocalConfiguration provides Configuration(maxWidth.value.toInt(), maxHeight.value.toInt())) {
+            CompositionLocalProvider(
+                LocalDensity provides Density(density, base.fontScale),
+                LocalConfiguration provides Configuration((maxWidth.value / UI_SCALE).toInt(), (maxHeight.value / UI_SCALE).toInt()),
+            ) {
                 controller.Content()
             }
         }
     }
 }
+
+/** How much larger than on the phone everything is drawn. */
+private const val UI_SCALE = 1.25f

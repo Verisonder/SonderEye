@@ -54,7 +54,15 @@ class Painter(private val g: GlobeView) {
     private val shadePaint = Paint().apply { isAntiAlias = false }
 
     /** One tile's projected mesh for this frame. */
-    private class Projected(val pos: Array<Point>, val indices: ShortArray, val normals: FloatArray, val uv: FloatArray)
+    private class Projected(
+        val pos: Array<Point>,
+        /** Skirts and surface: for the picture itself. */
+        val indices: ShortArray,
+        /** Surface only: for night, lights and the overlays, which must not double up at the seams. */
+        val surface: ShortArray,
+        val normals: FloatArray,
+        val uv: FloatArray,
+    )
 
     fun draw(c: Canvas, v: View, density: Float) {
         g.tiles.nextFrame()
@@ -144,11 +152,11 @@ class Painter(private val g: GlobeView) {
                         argb(((1 - d) * k2 * 255).toInt(), 255, 235, 191)
                     }
                     texPaint.blendMode = BlendMode.PLUS
-                    c.drawTriangles(p.pos, colors, tex, p.indices, BlendMode.MODULATE, texPaint)
+                    c.drawTriangles(p.pos, colors, tex, p.surface, BlendMode.MODULATE, texPaint)
                     texPaint.blendMode = BlendMode.SRC_OVER
                 } else {
                     texPaint.alpha = (src.alpha * 255).toInt()
-                    c.drawTriangles(p.pos, null, tex, p.indices, BlendMode.SRC_OVER, texPaint)
+                    c.drawTriangles(p.pos, null, tex, if (pass == 0) p.indices else p.surface, BlendMode.SRC_OVER, texPaint)
                     texPaint.alpha = 255
                     if (pass == 0 && shading) {
                         // The night side: darker, with a twilight band across the terminator.
@@ -158,19 +166,43 @@ class Painter(private val g: GlobeView) {
                         }
                         shadePaint.shader = null
                         shadePaint.color = 0xFF000000.toInt()
-                        c.drawTriangles(p.pos, colors, null, p.indices, BlendMode.DST, shadePaint)
+                        c.drawTriangles(p.pos, colors, null, p.surface, BlendMode.DST, shadePaint)
                     }
                 }
                 texPaint.shader = null
             }
         }
         if (overlays.isEmpty()) drawRoads(c, v, density, g.roads.takeIf { alt <= g.roadsMaxAlt })
+        drawCaps(c, v)
         g.tiles.trim(used)
 
         val status = GlobeStatus(loading, g.tiles.failures, if (g.tiles.failures > 0) g.tiles.lastFailure else null)
         if (status != lastStatus) {
             lastStatus = status
             javax.swing.SwingUtilities.invokeLater { g.status(status) }
+        }
+    }
+
+    private val capPaint = Paint().apply { isAntiAlias = true; color = OCEAN }
+
+    /** The polar caps beyond the map's 85°: filled flat, so the globe has no holes at the poles. */
+    private fun drawCaps(c: Canvas, v: View) {
+        for (north in listOf(true, false)) {
+            val lat = if (north) CAP_LAT else -CAP_LAT
+            if (!v.aboveHorizon(Geo.ecef(if (north) 90.0 else -90.0, 0.0))) continue
+            val path = Path()
+            var first = true
+            var any = false
+            for (i in 0..72) {
+                val p = Geo.ecef(lat, -180.0 + i * 5.0)
+                val s = if (v.aboveHorizon(p)) v.project(p) else null
+                if (s == null) continue
+                if (first) path.moveTo(s[0].toFloat(), s[1].toFloat()) else path.lineTo(s[0].toFloat(), s[1].toFloat())
+                first = false
+                any = true
+            }
+            if (any) c.drawPath(path, capPaint)
+            path.close()
         }
     }
 
@@ -234,7 +266,10 @@ class Painter(private val g: GlobeView) {
         }
         if (!anyFront) return null
         val keep = ShortArray(idx.size)
+        val surface = ShortArray(idx.size)
         var m = 0
+        var ms = 0
+        val skirtEnd = idx.size - n * n * 6 // skirts come first
         var t = 0
         while (t + 2 < idx.size) {
             val a = idx[t].toInt()
@@ -242,6 +277,7 @@ class Painter(private val g: GlobeView) {
             val cc = idx[t + 2].toInt()
             if (ok[a] && ok[b] && ok[cc] && (front[a] || front[b] || front[cc])) {
                 keep[m++] = idx[t]; keep[m++] = idx[t + 1]; keep[m++] = idx[t + 2]
+                if (t >= skirtEnd) { surface[ms++] = idx[t]; surface[ms++] = idx[t + 1]; surface[ms++] = idx[t + 2] }
             }
             t += 3
         }
@@ -249,7 +285,7 @@ class Painter(private val g: GlobeView) {
         // Skia wants a multiple of three positions even with indices: pad with a spare point.
         val padded = ((count + 2) / 3) * 3
         val pos = Array(padded) { i -> if (i < count) Point(xs[i], ys[i]) else Point(xs[0], ys[0]) }
-        return Projected(pos, keep.copyOf(m), normals, uv)
+        return Projected(pos, keep.copyOf(m), surface.copyOf(ms), normals, uv)
     }
 
     /** The phone draws skirts after the grid (the depth test hides them); here they go first. */
@@ -326,6 +362,8 @@ class Painter(private val g: GlobeView) {
         private const val SPLIT_PX = 512.0
         private const val TILE_LIMIT = 180
         private const val ROADS_MAX_ALT = 1_500_000.0
+        /** Where Web Mercator tiles end. */
+        private const val CAP_LAT = 85.0511
         const val OCEAN = 0xFF0B1A2A.toInt()
         const val SPACE = 0xFF03060A.toInt()
         @Suppress("unused") private val HOME = CameraState.HOME

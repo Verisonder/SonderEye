@@ -56,6 +56,26 @@ jobs:
           powershell -NoProfile -Command "Compress-Archive -Path 'desktop/app/build/compose/binaries/main/app/SonderEye' -DestinationPath 'SonderEye-$VERSION-Portable.zip'"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      # Starts the built app once on this Windows machine and photographs the screen: proof it
+      # opens and draws, and any crash it logged.
+      - name: Start it once (smoke test)
+        if: startsWith(github.ref, 'refs/heads/')
+        shell: pwsh
+        run: |
+          $app = "desktop/app/build/compose/binaries/main/app/SonderEye/SonderEye.exe"
+          $p = Start-Process $app -PassThru
+          Start-Sleep -Seconds 45
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("screenshot.png")
+          "running after 45 s: $(-not $p.HasExited)" | Out-File smoke.txt
+          $log = Join-Path $env:LOCALAPPDATA "SonderEye/files/crash.log"
+          if (Test-Path $log) { Get-Content $log | Out-File -Append smoke.txt } else { "no crash log" | Out-File -Append smoke.txt }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+
       - name: Publish (test build)
         if: startsWith(github.ref, 'refs/heads/')
         shell: bash
@@ -63,7 +83,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete windows-test --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create windows-test "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" \
+          gh release create windows-test "SonderEye-$VERSION-Setup.exe" "SonderEye-$VERSION-Portable.zip" screenshot.png smoke.txt \
             --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
             --title "SonderEye for Windows, test build" \
             --notes "Test build from $GITHUB_REF_NAME at $GITHUB_SHA"
