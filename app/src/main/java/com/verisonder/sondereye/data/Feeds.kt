@@ -93,11 +93,41 @@ object Feeds {
 
     fun conflicts() = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT", com.verisonder.sondereye.core.Gdelt::parse)
 
+    /**
+     * Overpass allows each phone only a query or two at a time and turns away the rest, and
+     * the app now asks it for cameras, bus lines and street roads. So its queries go one at a
+     * time, in the order asked, and a busy or failing server hands over to the next public
+     * one. A query the server rejects as wrong (400) is not retried elsewhere.
+     */
+    private val overpassTurn = java.util.concurrent.locks.ReentrantLock(true)
+    private val OVERPASS_SERVERS = listOf(
+        Overpass.URL,
+        "https://overpass.private.coffee/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    )
+
+    private fun <T> overpass(body: String, what: String, slow: Boolean, parse: (String) -> T): Net.Outcome<T> {
+        overpassTurn.lock()
+        try {
+            var last: Net.Outcome.Failed? = null
+            for (url in OVERPASS_SERVERS) {
+                val o = if (slow) Net.postSlow(url, body, what, "OpenStreetMap Overpass", parse)
+                else Net.post(url, body, what, "OpenStreetMap Overpass", parse)
+                if (o is Net.Outcome.Ok) return o
+                last = o as Net.Outcome.Failed
+                if (o.code == 400) return o
+            }
+            return last!!
+        } finally {
+            overpassTurn.unlock()
+        }
+    }
+
     fun roads(s: Double, w: Double, n: Double, e: Double) =
-        Net.postSlow(Overpass.URL, com.verisonder.sondereye.core.OsmRoads.query(s, w, n, e), "Roads", "OpenStreetMap Overpass", com.verisonder.sondereye.core.OsmRoads::parse)
+        overpass(com.verisonder.sondereye.core.OsmRoads.query(s, w, n, e), "Roads", slow = true, parse = com.verisonder.sondereye.core.OsmRoads::parse)
 
     fun busLines(s: Double, w: Double, n: Double, e: Double) =
-        Net.postSlow(Overpass.URL, BusLines.query(s, w, n, e), "Bus lines", "OpenStreetMap Overpass", BusLines::parse)
+        overpass(BusLines.query(s, w, n, e), "Bus lines", slow = true, parse = BusLines::parse)
 
     /** Realtime feeds of the operators serving the point. */
     fun busFeeds(key: String, lat: Double, lon: Double, radiusM: Int) =
@@ -164,7 +194,7 @@ object Feeds {
     fun firesWorld(key: String) = Net.get(Firms.worldUrl(key), "Fires", "NASA FIRMS", Firms::parse)
 
     fun cameras(s: Double, w: Double, n: Double, e: Double) =
-        Net.post(Overpass.URL, Overpass.cameraQuery(s, w, n, e), "Cameras", "OpenStreetMap Overpass", Overpass::parseCameras)
+        overpass(Overpass.cameraQuery(s, w, n, e), "Cameras", slow = false, parse = Overpass::parseCameras)
 
     /**
      * Orbital elements, cached on disk for 2 hours as CelesTrak asks. When a download

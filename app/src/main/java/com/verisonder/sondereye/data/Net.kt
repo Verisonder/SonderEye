@@ -97,7 +97,7 @@ object Net {
         } catch (e: UnknownHostException) {
             Outcome.Failed("$what: no connection ($source not reachable)")
         } catch (e: SocketTimeoutException) {
-            Outcome.Failed("$what: $source did not answer within ${TIMEOUT_MS / 1000} s")
+            Outcome.Failed("$what: $source did not answer within ${timeoutMs / 1000} s", 408)
         } catch (e: IOException) {
             Outcome.Failed("$what: download failed (${e.javaClass.simpleName}: ${e.message})")
         } finally {

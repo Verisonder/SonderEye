@@ -1023,7 +1023,7 @@ class MainActivity : ComponentActivity() {
         return moved > last[2] * 0.5 || roadsRadius(c[2]) > last[2] * 1.25
     }
 
-    private fun roadsRadius(alt: Double) = (alt * 1.6).coerceIn(1_500.0, 5_000.0)
+    private fun roadsRadius(alt: Double) = (alt * 1.4).coerceIn(1_500.0, 3_500.0)
 
     private fun loadRoads() {
         val c = globe?.center() ?: return
