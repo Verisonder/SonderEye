@@ -4,12 +4,12 @@
 
 <h1 align="center">SonderEye</h1>
 
-<p align="center">The planet's live traffic on a 3D globe, on your phone.<br>
+<p align="center">The planet's live traffic on a 3D globe, on your phone and on Windows.<br>
 Free, open source, no account, no backend.</p>
 
 <p align="center">
-  <a href="https://github.com/Verisonder/SonderEye/releases/latest"><b>Download the latest APK</b></a>
-  &nbsp;·&nbsp; Android 8.0 or newer
+  <a href="https://github.com/Verisonder/SonderEye/releases/latest"><b>Download</b></a>:
+  the APK for Android 8.0 or newer, or the setup / portable app for Windows 10 and 11
 </p>
 
 ---
@@ -97,6 +97,26 @@ Permissions: internet; location only for "Where I am"; camera only for the sky v
 The APK is signed with the project's own key, so later releases install over it and keep
 your settings.
 
+## Windows
+
+The same app as a native Windows program (`desktop/`), built with Compose for Desktop. It
+runs the Android app's own data and maths code (`core/`, and the downloads in `data/`),
+compiled straight from `app/src/main/java`, so both behave the same.
+
+- **Download**: `SonderEye-<version>-Setup.exe` installs it (Start menu and desktop shortcut,
+  no administrator rights needed); `SonderEye-<version>-Portable.zip` is a folder with
+  `SonderEye.exe` that runs from anywhere. Both include their own Java runtime.
+- **Mouse**: drag to move, wheel to zoom at the pointer, right-drag to turn, click to pick,
+  double-click to zoom in, right-click (or hold still a second) for the weather there and
+  to set it as your place. Escape closes the panel or card on top.
+- **Your place**: a PC has no GPS, so it comes from your internet connection (to a few km)
+  unless you set it yourself; your own place always wins.
+- **ISS pass alerts** are Windows notifications, while the app is open.
+- Left out on Windows: the sky view (it needs a phone's camera and motion sensors) and
+  riding a bus (it needs a position that moves with you).
+- The installer is not code-signed: Windows SmartScreen asks once ("More info", then
+  "Run anyway").
+
 ## Privacy
 
 No account, no server of ours, no analytics. The app asks each source directly for what it
@@ -112,6 +132,9 @@ JDK 17 and Gradle 8.9.
 gradle assembleDebug
 gradle testDebugUnitTest
 ```
+
+Windows: `gradle -p desktop :app:run` to start it, `:app:packageExe` for the installer
+(JDK 17; WiX for the installer, as on GitHub's Windows machines).
 
 CI downloads the bundled Blue Marble tiles (`tools/fetch_bluemarble.py`, about 5,500 tiles,
 cached between runs) before building; a local build without them still works, just without
