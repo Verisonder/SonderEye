@@ -186,6 +186,8 @@ class EyeState {
     var listLayer by mutableStateOf<String?>(null)
     /** Clean view: only the globe (and cards you open by tapping). */
     var chromeHidden by mutableStateOf(false)
+    /** The legend alone tucked away; a tab at the left edge brings it back. */
+    var legendHidden by mutableStateOf(false)
     /** Every source in use, for the menu's list (the screen shows only the required ones). */
     var allCredits by mutableStateOf<List<String>>(emptyList())
     /** Time of the radar frame on screen. */

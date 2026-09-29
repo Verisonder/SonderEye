@@ -259,7 +259,24 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
         }
 
-        if (!panelOpen && !(cardOpen && sideways)) Legend(
+        if (!panelOpen && state.legendHidden) {
+            // The legend tucked away: a small tab at the left edge, red while something is failing.
+            val failing = problemCount(state) > 0
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(top = 12.dp)
+                    .size(width = 30.dp, height = 56.dp)
+                    .background(Palette.panel)
+                    .border(1.dp, if (failing) Palette.error else Palette.line)
+                    .clickable { state.legendHidden = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Show the legend", tint = if (failing) Palette.error else Palette.signal)
+            }
+        }
+        if (!panelOpen && !state.legendHidden && !(cardOpen && sideways)) Legend(
             state, actions,
             Modifier
                 .align(Alignment.TopStart)
@@ -572,11 +589,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
 @Composable
 private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
-    val problems = listOfNotNull(
-        state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
-        state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.meProblem, state.alertProblem,
-        state.shipsProblem, state.globeError,
-    ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
+    val problems = problemCount(state)
     val shape = RoundedCornerShape(2.dp)
     // Sideways the details are taller than the screen: the panel stops above the bottom and scrolls.
     val maxH = (LocalConfiguration.current.screenHeightDp - 80).coerceAtLeast(160)
@@ -594,7 +607,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         // The keys, and top right a small button that opens the details under them.
         Box {
             FlowRow(
-                Modifier.padding(end = 30.dp),
+                Modifier.padding(end = 60.dp), // room for the two keys
                 horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
@@ -610,19 +623,18 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
                 if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
             }
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 6.dp, y = (-4).dp)
-                    .size(30.dp)
-                    .clickable { open = !open },
-                Alignment.Center,
-            ) {
-                Icon(
-                    if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (open) "Hide the details" else "Show the details",
-                    tint = Palette.signal, modifier = Modifier.size(24.dp),
-                )
+            // Top right: open the details, and tuck the legend away to the left edge.
+            Row(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp)) {
+                Box(Modifier.size(30.dp).clickable { open = !open }, Alignment.Center) {
+                    Icon(
+                        if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (open) "Hide the details" else "Show the details",
+                        tint = Palette.signal, modifier = Modifier.size(24.dp),
+                    )
+                }
+                Box(Modifier.size(30.dp).clickable { state.legendHidden = true }, Alignment.Center) {
+                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Hide the legend", tint = Palette.signal, modifier = Modifier.size(24.dp))
+                }
             }
         }
         val g = state.globeStatus
@@ -651,6 +663,13 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         }
     }
 }
+
+/** Everything failing right now; the legend's frame (or its tab) turns red while any is. */
+private fun problemCount(state: EyeState): Int = listOfNotNull(
+    state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
+    state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.conflicts.error, state.meProblem, state.alertProblem,
+    state.shipsProblem, state.globeError,
+).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
 
 /** One legend entry: symbol, count, name. Tap it for the full list. */
 @Composable
