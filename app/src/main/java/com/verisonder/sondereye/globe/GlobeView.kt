@@ -259,6 +259,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         override fun onDown(e: MotionEvent) = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (held) return true // that was the end of a long hold, not a tap
             // Later layers are on top, so on a tie they win: search from the end.
             val i = Pick.nearest(view(), markerLat, markerLon, e.x.toDouble(), e.y.toDouble(), 30.0 * density, markerAlt)
             val key = all.getOrNull(i)?.key
@@ -281,19 +282,32 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
             return true
         }
 
-        override fun onLongPress(e: MotionEvent) {
-            if (scaler.isInProgress) return
-            val p = view().pick(e.x.toDouble(), e.y.toDouble()) ?: return
-            val ll = Geo.latLon(p)
-            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            listener.onLongPress(ll[0], ll[1])
-        }
-
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
             if (e2.pointerCount == 1) fling(vx, vy)
             return true
         }
     })
+
+    init {
+        // The detector's long-press (~0.4 s) fired by mistake while resting a finger on the
+        // map: ours below needs a deliberate hold.
+        taps.setIsLongpressEnabled(false)
+    }
+
+    /** A finger held still this long on the ground asks for the weather there. */
+    private val holdMs = 1_000L
+    private val slopPx = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var downX = 0f
+    private var downY = 0f
+    /** The hold fired: the lift that ends it is not also a tap. */
+    private var held = false
+    private val hold = Runnable {
+        val p = view().pick(downX.toDouble(), downY.toDouble()) ?: return@Runnable
+        held = true
+        val ll = Geo.latLon(p)
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        listener.onLongPress(ll[0], ll[1])
+    }
 
     private var lastX = 0f
     private var lastY = 0f
@@ -303,6 +317,17 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (e.actionMasked == MotionEvent.ACTION_DOWN) stopAnimation()
+        // Long hold: armed on one finger down; any movement, second finger or lift cancels it.
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x; downY = e.y
+                held = false
+                removeCallbacks(hold)
+                postDelayed(hold, holdMs)
+            }
+            MotionEvent.ACTION_MOVE -> if (hypot((e.x - downX).toDouble(), (e.y - downY).toDouble()) > slopPx) removeCallbacks(hold)
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> removeCallbacks(hold)
+        }
         scaler.onTouchEvent(e)
         taps.onTouchEvent(e)
 
