@@ -243,14 +243,17 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .widthIn(max = 380.dp),
         )
 
-        // Right: one tool strip.
+        // Right: one tool strip. Sideways the screen is shorter than the strip, so it scrolls.
+        val stripMax = (LocalConfiguration.current.screenHeightDp - 40).coerceAtLeast(120)
         if (!hidden) Column(
             Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(12.dp)
+                .heightIn(max = stripMax.dp)
                 .background(Palette.panel, RoundedCornerShape(14.dp))
-                .border(1.dp, Palette.line, RoundedCornerShape(14.dp)),
+                .border(1.dp, Palette.line, RoundedCornerShape(14.dp))
+                .verticalScroll(rememberScrollState()),
         ) {
             Tool(Icons.Default.KeyboardArrowRight, "Hide the controls", false) {
                 state.layersOpen = false
@@ -259,6 +262,14 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 state.chromeHidden = true
             }
             ToolDivider()
+            // North up comes first when the map is turned: it is the key you need right then.
+            val heading = state.view?.getOrNull(3) ?: 0.0
+            if (heading > 0.5 && heading < 359.5) {
+                Box(Modifier.size(48.dp).clickable(onClick = actions.northUp), Alignment.Center) {
+                    Text("N", color = Palette.magenta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.rotate(-heading.toFloat()))
+                }
+                ToolDivider()
+            }
             Tool(Icons.Default.Menu, "Layers and settings", state.layersOpen) {
                 state.layersOpen = !state.layersOpen
                 state.search.open = false
@@ -289,17 +300,6 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             Tool(Icons.Default.Star, "Sky view", false, onClick = actions.sky)
             ToolDivider()
             Tool(Icons.Default.Home, "Whole Earth", false, onClick = actions.home)
-            val heading = state.view?.getOrNull(3) ?: 0.0
-            if (heading > 0.5 && heading < 359.5) {
-                ToolDivider()
-                // North up: the arrow points where north is now.
-                Box(
-                    Modifier.size(48.dp).clickable(onClick = actions.northUp),
-                    Alignment.Center,
-                ) {
-                    Text("N", color = Palette.magenta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.rotate(-heading.toFloat()))
-                }
-            }
         }
 
         AnimatedVisibility(
