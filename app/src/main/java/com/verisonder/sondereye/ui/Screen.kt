@@ -322,11 +322,11 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Tool(Icons.Default.Refresh, "Refresh", false, onClick = actions.refresh)
             }
             ToolDivider()
-            Tool(Icons.Default.LocationOn, "Where I am", false, tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+            Tool(Icons.Default.LocationOn, "Where I am: fly to my position", false, tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
             ToolDivider()
             Tool(SkyIcon, "Sky view: point the phone at the sky", false, onClick = actions.sky)
             ToolDivider()
-            Tool(Icons.Default.Home, "Whole Earth", false, onClick = actions.home)
+            Tool(EarthIcon, "Whole Earth: zoom out, north up", false, onClick = actions.home)
         }
 
         AnimatedVisibility(
@@ -688,6 +688,18 @@ private val SkyIcon: ImageVector by lazy {
         ),
         fill = androidx.compose.ui.graphics.SolidColor(Color.Black),
     ).build()
+}
+
+/** A globe (outline, equator, one meridian): "back to the whole Earth". A house read as "my home". */
+private val EarthIcon: ImageVector by lazy {
+    val stroke = androidx.compose.ui.graphics.SolidColor(Color.Black)
+    ImageVector.Builder("earth", 24.dp, 24.dp, 24f, 24f)
+        .addPath(
+            pathData = androidx.compose.ui.graphics.vector.addPathNodes(
+                "M12,3 A9,9 0 1,1 11.99,3 Z M3,12 L21,12 M12,3 C8,6 8,18 12,21 C16,18 16,6 12,3 Z M4.8,7.5 L19.2,7.5 M4.8,16.5 L19.2,16.5",
+            ),
+            stroke = stroke, strokeLineWidth = 1.8f,
+        ).build()
 }
 
 /** A key on the tool strip. Long-press says what it does. */
