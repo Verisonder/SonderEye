@@ -172,6 +172,8 @@ class EyeState {
     var following by mutableStateOf<String?>(null)
     val search = SearchState()
     val brief = BriefState()
+    /** The layer whose full list is open ("quakes", "flights"…), or null. */
+    var listLayer by mutableStateOf<String?>(null)
     /** Clean view: only the globe (and cards you open by tapping). */
     var chromeHidden by mutableStateOf(false)
     /** Every source in use, for the menu's list (the screen shows only the required ones). */
@@ -313,6 +315,17 @@ class MainActivity : ComponentActivity() {
                         clearCache = ::clearCache,
                         measureCache = ::measureCache,
                         northUp = { globe?.northUp() },
+                        openList = { layer ->
+                            state.listLayer = layer
+                            if (layer != null) {
+                                state.layersOpen = false; state.search.open = false; state.brief.open = false
+                            }
+                        },
+                        goTo = { sel ->
+                            state.listLayer = null
+                            select(sel)
+                            globe?.select(sel.key, fly = true)
+                        },
                         brief = { open ->
                             state.brief.open = open
                             if (open) {

@@ -159,6 +159,10 @@ class Actions(
     val measureCache: () -> Unit,
     val saveKeys: (Keys) -> Unit,
     val northUp: () -> Unit,
+    /** Open the full list of one layer (null closes it). */
+    val openList: (String?) -> Unit,
+    /** Fly to something from a list and open its card. */
+    val goTo: (Sel) -> Unit,
     /** Open (true) or close the day's brief. */
     val brief: (Boolean) -> Unit,
     val reloadBrief: () -> Unit,
@@ -181,8 +185,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
     }
 
-    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open || state.brief.open || state.chromeHidden) {
+    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open || state.brief.open || state.chromeHidden || state.listLayer != null) {
         when {
+            state.listLayer != null -> actions.openList(null)
             state.chromeHidden && state.selected == null -> state.chromeHidden = false
             state.brief.open -> actions.brief(false)
             state.search.open -> state.search.open = false
@@ -204,7 +209,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
 
         // An open panel takes the space; the legend and readout step aside rather than show under it.
         // In the clean view everything steps aside.
-        val panelOpen = state.layersOpen || state.search.open || state.brief.open || hidden
+        val panelOpen = state.layersOpen || state.search.open || state.brief.open || state.listLayer != null || hidden
 
         if (hidden) {
             // The only control left: a small tab on the right edge that brings everything back.
@@ -352,6 +357,18 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             last.sel?.let { SelectionCard(it, state, now, actions) }
         }
 
+        state.listLayer?.let { layer ->
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(top = 12.dp, end = 76.dp, start = 12.dp)
+                    .widthIn(max = 460.dp)
+            ) {
+                LayerList(layer, state, actions)
+            }
+        }
+
         if (state.brief.open) {
             Box(
                 Modifier
@@ -408,6 +425,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                     q.updatedAt?.let { append(", ${clock(it)}") }
                     if (q.skipped > 0) append(", ${q.skipped} unreadable")
                 },
+                onOpen = { actions.openList("quakes") },
             )
         }
         if (l.flights) {
@@ -417,6 +435,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 Palette.flight,
                 if (f.updatedAt == null) "Loading flights…" else count(f.items.size, "flight"),
                 "within 250 nm of the centre",
+                onOpen = { actions.openList("flights") },
             )
         }
         if (l.satellites) {
@@ -429,6 +448,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                     append(l.satGroup.label.lowercase())
                     if (state.satsDeep > 0) append(", ${state.satsDeep} high-orbit (approximate)")
                 },
+                onOpen = { actions.openList("sats") },
             )
         }
         if (l.events) {
@@ -438,6 +458,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 Palette.event("wildfires"),
                 if (e.updatedAt == null && e.loading) "Loading natural events…" else count(e.items.size, "natural event"),
                 "open, last 30 days",
+                onOpen = { actions.openList("events") },
             )
         }
         if (l.radar) {
@@ -452,19 +473,20 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 Palette.alpr,
                 state.camerasNote?.let { "Cameras" } ?: if (c.loading && c.updatedAt == null) "Loading cameras…" else count(c.items.size, "camera"),
                 state.camerasNote ?: "${c.items.count { it.alpr }} plate readers, OpenStreetMap",
+                onOpen = { actions.openList("cameras") },
             )
         }
         if (l.ships) {
             any = true
-            LayerLine(Palette.ship, if (state.shipsNote != null) "Ships" else count(state.ships.size, "ship"), state.shipsNote ?: "live AIS, AISStream")
+            LayerLine(Palette.ship, if (state.shipsNote != null) "Ships" else count(state.ships.size, "ship"), state.shipsNote ?: "live AIS, AISStream") { actions.openList("ships") }
         }
         if (l.webcams) {
             any = true
-            LayerLine(Palette.webcam, if (state.webcamsNote != null) "Webcams" else count(state.webcams.items.size, "webcam"), state.webcamsNote ?: "near the centre, Windy")
+            LayerLine(Palette.webcam, if (state.webcamsNote != null) "Webcams" else count(state.webcams.items.size, "webcam"), state.webcamsNote ?: "near the centre, Windy") { actions.openList("webcams") }
         }
         if (l.fires) {
             any = true
-            LayerLine(Palette.fire, if (state.firesNote != null) "Fires" else count(state.fires.items.size, "fire hotspot"), state.firesNote ?: "last 24 h, NASA FIRMS")
+            LayerLine(Palette.fire, if (state.firesNote != null) "Fires" else count(state.fires.items.size, "fire hotspot"), state.firesNote ?: "last 24 h, NASA FIRMS") { actions.openList("fires") }
         }
         state.following?.let { hex ->
             val f = state.flights.items.firstOrNull { it.hex == hex }
@@ -521,14 +543,14 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         val l = state.layers
         fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
         FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes")
-            if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights")
-            if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites")
-            if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships")
-            if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events")
-            if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires")
-            if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras")
-            if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams")
+            if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
+            if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights") { actions.openList("flights") }
+            if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites") { actions.openList("sats") }
+            if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships") { actions.openList("ships") }
+            if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
+            if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
+            if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
+            if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
             if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
         }
         val g = state.globeStatus
@@ -557,10 +579,10 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     }
 }
 
-/** One legend entry: symbol, count, name. */
+/** One legend entry: symbol, count, name. Tap it for the full list. */
 @Composable
-private fun Key(sym: Sym, color: Color, value: String, name: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun Key(sym: Sym, color: Color, value: String, name: String, onOpen: (() -> Unit)? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier) {
         Symbol(sym, color, 14.dp)
         Spacer(Modifier.width(5.dp))
         Text(value, color = Palette.text, style = Figures.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
@@ -802,8 +824,11 @@ private fun position(v: DoubleArray): String {
 }
 
 @Composable
-private fun LayerLine(dot: Color, title: String, detail: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun LayerLine(dot: Color, title: String, detail: String, onOpen: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen).padding(vertical = 3.dp) else Modifier),
+    ) {
         // Outlined: some layer colours (white aircraft) would vanish on chart paper.
         Box(Modifier.size(9.dp).background(dot, CircleShape).border(1.dp, Palette.text, CircleShape))
         Spacer(Modifier.width(8.dp))
@@ -813,7 +838,9 @@ private fun LayerLine(dot: Color, title: String, detail: String) {
                 withStyle(SpanStyle(color = Palette.dim)) { append("  $detail") }
             },
             fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (onOpen != null) Text("›", color = Palette.signal, fontSize = 20.sp, modifier = Modifier.padding(start = 6.dp))
     }
 }
 
@@ -1094,6 +1121,106 @@ private fun weatherDetail(w: Weather): String = listOfNotNull(
     w.cloudPct?.let { "clouds $it%" },
     w.precipMm?.takeIf { it > 0 }?.let { "rain %.1f mm".format(it) },
 ).joinToString(", ").replaceFirstChar { it.uppercase() }
+
+// ---- A layer's full list --------------------------------------------------------------------------
+
+/** One row: what it is, the key facts, and where to go when tapped. */
+private class ListRow(val sel: Sel, val sym: Sym, val color: Color, val title: String, val detail: String, val sortA: Double, val sortB: Double)
+
+@Composable
+private fun LayerList(layer: String, state: EyeState, actions: Actions) {
+    val now = state.clock
+    // Two orders per layer: the first is the default.
+    val (name, orders, rows) = when (layer) {
+        "quakes" -> Triple("Earthquakes", "Newest" to "Strongest", state.quakes.items.map { q ->
+            ListRow(Sel.OfQuake(q), Sym.DOT, Palette.depth(q.depthKm), "${Fmt.mag(q.mag)}  ${q.place}",
+                "${Fmt.ago(q.timeMs, now)}, ${Fmt.depth(q.depthKm)}" + (Fmt.typeLabel(q.type)?.let { ", ${it.lowercase()}" } ?: ""),
+                q.timeMs.toDouble(), q.mag ?: 0.0)
+        })
+        "flights" -> Triple("Flights", "Highest" to "Fastest", state.flights.items.map { f ->
+            ListRow(Sel.OfFlight(f), Sym.PLANE, Palette.flight, f.callsign ?: f.hex.uppercase(),
+                listOfNotNull(f.type, if (f.onGround) "on the ground" else f.altFt?.let { "%,d ft".format(it) }, f.speedKt?.let { "${it.roundToInt()} kt" }).joinToString(", "),
+                (f.altFt ?: -1).toDouble(), f.speedKt ?: 0.0)
+        })
+        "sats" -> Triple("Satellites", "Lowest" to "Name", (state.sats.items + state.extraSats).map { sat ->
+            val p = sat.ecefAt(now)
+            val km = p?.let { (it.len() - EARTH_R) / 1000 } ?: 0.0
+            ListRow(Sel.OfSat(sat), Sym.DIAMOND, Palette.satellite, sat.tle.name, "${km.roundToInt()} km up, NORAD ${sat.tle.norad}",
+                -km, -sat.tle.name.first().code.toDouble())
+        })
+        "events" -> Triple("Natural events", "Newest" to "Type", state.events.items.map { e ->
+            ListRow(Sel.OfEvent(e), Sym.DOT, Palette.event(e.category), e.title,
+                e.categoryTitle + (e.timeMs?.let { ", ${Fmt.ago(it, now).lowercase()}" } ?: ""),
+                (e.timeMs ?: 0).toDouble(), -e.category.first().code.toDouble())
+        })
+        "fires" -> Triple("Fire hotspots", "Strongest" to "Newest", state.fires.items.map { h ->
+            ListRow(Sel.OfFire(h), Sym.DOT, Palette.fire, h.frpMw?.let { "Fire, %.1f MW".format(it) } ?: "Fire",
+                "%.3f, %.3f, seen %s UTC".format(h.lat, h.lon, h.acquired), h.frpMw ?: 0.0, h.acquired.hashCode().toDouble())
+        })
+        "ships" -> Triple("Ships", "Fastest" to "Latest report", state.ships.values.map { sh ->
+            ListRow(Sel.OfShip(sh), Sym.PLANE, Palette.ship, sh.name ?: "MMSI ${sh.mmsi}",
+                listOfNotNull(sh.sogKt?.let { "%.1f kn".format(it) }, Fmt.ago(sh.atMs, now).lowercase()).joinToString(", "),
+                sh.sogKt ?: 0.0, sh.atMs.toDouble())
+        })
+        "cameras" -> Triple("Surveillance cameras", "Plate readers first" to "All", state.cameras.items.map { c ->
+            ListRow(Sel.OfCamera(c), Sym.DOT, if (c.alpr) Palette.alpr else Palette.camera, if (c.alpr) "Licence-plate reader" else "Surveillance camera",
+                listOfNotNull(c.operator, c.direction?.let { "facing ${Sky.compass(it)}" }).joinToString(", ").ifEmpty { "No details mapped" },
+                if (c.alpr) 1.0 else 0.0, 0.0)
+        })
+        "webcams" -> Triple("Webcams", "Name" to "Place", state.webcams.items.map { w ->
+            ListRow(Sel.OfWebcam(w), Sym.DIAMOND, Palette.webcam, w.title, w.place ?: "", -w.title.first().code.toDouble(), -(w.place?.firstOrNull()?.code ?: 0).toDouble())
+        })
+        else -> Triple(layer, "" to "", emptyList())
+    }
+    var second by remember(layer) { mutableStateOf(false) }
+    var filter by remember(layer) { mutableStateOf("") }
+    val shown = rows
+        .filter { filter.isBlank() || it.title.contains(filter, true) || it.detail.contains(filter, true) }
+        .sortedByDescending { if (second) it.sortB else it.sortA }
+    Surface(
+        color = Palette.panel,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(18.dp)),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${rows.size} ${name.lowercase()}", color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { actions.openList(null) }) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
+            }
+            if (orders.first.isNotEmpty()) {
+                ChipRow(listOf(false, true), second, { if (it) orders.second else orders.first }, true) { second = it }
+            }
+            if (rows.size > 8) {
+                OutlinedTextField(
+                    value = filter, onValueChange = { filter = it }, singleLine = true,
+                    placeholder = { Text("Filter", color = Palette.dim) },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                )
+            }
+            if (rows.isEmpty()) Text("Nothing here right now.", color = Palette.dim, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
+            val maxH = (LocalConfiguration.current.screenHeightDp - 260).coerceIn(160, 620)
+            // A lazy list: fire hotspots can number in the thousands.
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = maxH.dp).padding(top = 6.dp)) {
+                items(shown.size) { i ->
+                    val r = shown[i]
+                    androidx.compose.foundation.layout.Row(
+                        Modifier.fillMaxWidth().clickable { actions.goTo(r.sel) }.padding(vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Symbol(r.sym, r.color, 14.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(r.title, color = Palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (r.detail.isNotEmpty()) Text(r.detail, color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text("›", color = Palette.signal, fontSize = 20.sp)
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ---- Today --------------------------------------------------------------------------------------
 
