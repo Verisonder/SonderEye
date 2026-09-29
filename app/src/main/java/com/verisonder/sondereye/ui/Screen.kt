@@ -29,6 +29,10 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -227,23 +231,6 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         val cardOpen = state.selected != null
         val sideways = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
-        if (hidden) {
-            // The tool strip tucked away: a small tab on the right edge brings it back.
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp)
-                    .size(width = 30.dp, height = 56.dp)
-                    .background(Palette.panel)
-                    .border(1.dp, Palette.line)
-                    .clickable { state.chromeHidden = false },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Show the tool strip", tint = Palette.signal)
-            }
-        }
-
         // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
         if (!panelOpen && !cardOpen) Column(
             Modifier
@@ -260,14 +247,19 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
         }
 
-        if (!panelOpen && state.legendHidden) {
+        AnimatedVisibility(
+            visible = !panelOpen && state.legendHidden,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = 12.dp),
+            enter = slideInHorizontally { -it } + fadeIn(),
+            exit = slideOutHorizontally { -it } + fadeOut(),
+        ) {
             // The legend tucked away: a small tab at the left edge, red while something is failing.
             val failing = problemCount(state) > 0
             Box(
                 Modifier
-                    .align(Alignment.TopStart)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp)
                     .size(width = 30.dp, height = 56.dp)
                     .background(Palette.panel)
                     .border(1.dp, if (failing) Palette.error else Palette.line)
@@ -277,18 +269,22 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Show the legend", tint = if (failing) Palette.error else Palette.signal)
             }
         }
-        if (!panelOpen && !state.legendHidden && !(cardOpen && sideways)) Legend(
-            state, actions,
-            Modifier
+        // The legend slides off to the left edge and back, rather than blinking out.
+        AnimatedVisibility(
+            visible = !panelOpen && !state.legendHidden && !(cardOpen && sideways),
+            modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(start = 12.dp, top = 12.dp, end = 76.dp)
-                .widthIn(max = 380.dp),
-        )
+                .padding(start = 12.dp, top = 12.dp, end = 76.dp),
+            enter = slideInHorizontally { -it } + fadeIn(),
+            exit = slideOutHorizontally { -it } + fadeOut(),
+        ) {
+            Legend(state, actions, Modifier.widthIn(max = 380.dp))
+        }
 
         // Right: one tool strip. Sideways the screen is shorter than the strip, so it scrolls.
         val stripMax = (LocalConfiguration.current.screenHeightDp - 40).coerceAtLeast(120)
-        if (!hidden) Column(
+        Column(
             Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
@@ -299,9 +295,17 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .border(1.dp, Palette.line, RoundedCornerShape(2.dp))
                 .verticalScroll(rememberScrollState()),
         ) {
-            Tool(Icons.Default.KeyboardArrowRight, "Hide this strip (the tab on the right brings it back)", false) {
-                state.chromeHidden = true
-            }
+            // The top key folds the strip up under itself, like a drop-down, and opens it again.
+            Tool(
+                if (hidden) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                if (hidden) "Open the tools" else "Fold the tools away", false,
+            ) { state.chromeHidden = !state.chromeHidden }
+            AnimatedVisibility(
+                visible = !hidden,
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+            ) {
+            Column {
             ToolDivider()
             // North: tap to turn north up; long-press to lock it there (and again to unlock).
             val heading = state.view?.getOrNull(3) ?: 0.0
@@ -370,6 +374,8 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             Tool(SkyIcon, "Sky view: point the phone at the sky", false, onClick = actions.sky)
             ToolDivider()
             ZoomKey(onTap = actions.home, onZoom = actions.zoomHold)
+            }
+            }
         }
 
         AnimatedVisibility(
