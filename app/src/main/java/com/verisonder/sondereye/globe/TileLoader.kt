@@ -100,6 +100,7 @@ class TileLoader(
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
             if (bmp == null) {
                 disk(t).delete()
+                if (t.source.emptyIsMissing) return onAbsent(t) // an error page instead of a tile: nothing here
                 throw Failure("not an image (${bytes.size} bytes)")
             }
             failedAt.remove(t)
@@ -127,6 +128,12 @@ class TileLoader(
             inFlight.remove(t)
             if (lastWanted.size > 20_000) prune()
         }
+    }
+
+    /** The tile failed less than [RETRY_MS] ago: the renderer looks to the levels above meanwhile. */
+    fun failedRecently(t: SourcedTile): Boolean {
+        val at = failedAt[t] ?: return false
+        return System.currentTimeMillis() - at < RETRY_MS
     }
 
     /** Every pixel fully transparent. All of them: a road can be a single pixel wide. */
@@ -168,6 +175,8 @@ class TileLoader(
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
             val code = conn.responseCode
             if (code == 404 || code == 204) return null
+            // Past its data, a reference layer may refuse rather than say "none": the same thing.
+            if (t.source.emptyIsMissing && code in 400..499) return null
             if (code != 200) throw Failure("HTTP $code")
             val bytes = conn.inputStream.use { it.readBytes() }
             runCatching {

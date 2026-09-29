@@ -255,8 +255,10 @@ class GlobeRenderer(
                 } else if (!mayRequest) {
                     found = loadedAncestor(src, want.key)
                 } else {
-                    if (pass == 0 && want in absent) baseReady.add(k) // nothing finer exists here
-                    if (want !in absent) {
+                    // Missing, or failing for now: either way the levels above stand in.
+                    val gone = want in absent || loader.failedRecently(want)
+                    if (pass == 0 && gone) baseReady.add(k) // nothing finer to wait for here
+                    if (!gone) {
                         loading++
                         loader.request(want)
                         // Coarse before fine: the parent arrives first and fills in quickly.
@@ -317,9 +319,8 @@ class GlobeRenderer(
         }
     }
 
-    /** Nearest ancestor of [k] whose texture is loaded, for [src]. */
     /**
-     * [k] has nothing (404). Asks for the nearest ancestor that may, to be stretched over it:
+     * [k] has nothing (missing, or failing for now). Asks for the nearest ancestor that may, to be stretched over it:
      * reference layers (roads, names) stop several zooms before the imagery does, and without
      * this only the direct parent was ever asked, so zooming past both left the layer empty.
      * True when a download was started.
@@ -329,7 +330,7 @@ class GlobeRenderer(
         while (a != null) {
             val t = SourcedTile(src, a)
             if (textures.containsKey(t)) return false // already here: loadedAncestor draws it
-            if (t !in absent) {
+            if (t !in absent && !loader.failedRecently(t)) {
                 loader.request(t)
                 return true
             }
@@ -338,6 +339,7 @@ class GlobeRenderer(
         return false
     }
 
+    /** Nearest ancestor of [k] whose texture is loaded, for [src]. */
     private fun loadedAncestor(src: TileSource, k: TileKey): SourcedTile? {
         var a = k.parent()
         while (a != null) {
