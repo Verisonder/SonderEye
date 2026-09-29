@@ -7,6 +7,11 @@
 <p align="center">The planet's live traffic on a 3D globe, on your phone.<br>
 Free, open source, no account, no backend.</p>
 
+<p align="center">
+  <a href="https://github.com/Verisonder/SonderEye/releases/latest"><b>Download the latest APK</b></a>
+  &nbsp;·&nbsp; Android 8.0 or newer
+</p>
+
 ---
 
 SonderEye puts public signals on one native globe: earthquakes, aircraft, satellites,
@@ -23,11 +28,14 @@ not a web page in a wrapper.
   the one you pick and its next passes over you. GPS and geostationary orbits included.
 - Ships (AISStream), fire hotspots (NASA FIRMS) and public webcams (Windy), each with your own free key.
 - Natural events (NASA EONET): wildfires, volcanoes, storms, ice.
-- Conflicts: places the world's news reports fighting in, last 24 hours (GDELT), with the stories.
+- Conflicts: places the world's news reports fighting in (GDELT), up to a day back, with
+  the stories, and an optional short account of what happened, written by Gemini.
 - Rain radar (RainViewer), optionally looping the past hour.
 - Surveillance cameras and licence-plate readers mapped in OpenStreetMap.
-- Bus lines and stops mapped in OpenStreetMap, and live buses wherever the operator
-  publishes GTFS Realtime (found through Transitland, with your own free key).
+- Bus lines and stops mapped in OpenStreetMap, each line in its own colour; pick one to see
+  its whole route, or ride it: the map follows you and says the next stop and how many are left.
+- Live buses wherever the operator publishes GTFS Realtime (found through Transitland, with
+  your own free key).
 - Day and night, with city lights on the dark side.
 
 **Around it**
@@ -36,12 +44,14 @@ not a web page in a wrapper.
 - **Sky view**: point the phone at the sky to see the satellites, aircraft, Sun and Moon above you, labelled.
 - **ISS pass alerts**: a notification before each pass you can actually see.
 - **Search** for places, flights by callsign, and satellites by name.
-- A list of every item in each layer, sortable, one tap from flying to it.
+- A list of every item in each layer, nearest first, one tap from flying to it; any layer
+  can be hidden from the map from its list.
 
 ## The globe
 
 - Native OpenGL ES 3.0, camera-relative rendering: no float jitter from 40,000 km down to 120 m.
-- Esri satellite imagery, streets, or yesterday's whole Earth from NASA, with roads and place names on top.
+- Esri satellite imagery, streets, or yesterday's whole Earth from NASA, with roads and place
+  names on top; close in, the roads are drawn by the app from OpenStreetMap data, sharp at any zoom.
 - The whole Earth at country scale ships inside the app (NASA Blue Marble), so the globe appears at once, even offline.
 - Tiles load centre first, parents before children, and are kept on the phone (up to 500 MB).
 - Markers lie on the curved surface; satellites face you from orbit.
@@ -75,6 +85,24 @@ not a web page in a wrapper.
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
 
 Permissions: internet; location only for "Where I am"; camera only for the sky view; notifications only for pass alerts.
+
+## Installing
+
+1. Download `SonderEye-<version>.apk` from [Releases](https://github.com/Verisonder/SonderEye/releases/latest).
+2. Open it on the phone. Android asks once to allow installs from your browser or file manager.
+3. Everything without a key works straight away. For ships, webcams, fire hotspots, live
+   buses and the written summaries, get the free keys from the menu's **API keys** section
+   (each has a Get-a-key button) and paste them in.
+
+The APK is signed with the project's own key, so later releases install over it and keep
+your settings.
+
+## Privacy
+
+No account, no server of ours, no analytics. The app asks each source directly for what it
+shows; your keys and settings stay on the phone. Your position is used only on the phone,
+for "Where I am", the weather, pass alerts and bus rides, and is sent to no one except as the
+point of a weather or search request.
 
 ## Building
 

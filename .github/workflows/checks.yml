@@ -1,0 +1,43 @@
+name: Checks
+
+on:
+  push:
+    branches: [main, 'test/**']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unit tests and debug build
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon testDebugUnitTest assembleDebug 2>&1 | tee build-output.txt
+      - name: Report the failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # CI logs are not fetchable from outside, so the error is attached to a
+          # pre-release called ci-failure in this repository, where the API can read it.
+          cp build-output.txt out.txt
+          gh release view ci-failure --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create ci-failure --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Last CI failure" --notes "Replaced on every failed build."
+          echo "$GITHUB_WORKFLOW on $GITHUB_REF_NAME at $GITHUB_SHA" | cat - out.txt > failure.txt
+          gh release upload ci-failure failure.txt --repo "$GITHUB_REPOSITORY" --clobber

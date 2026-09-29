@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Only ever fired by pushing a tag. Nothing here runs on an ordinary commit, so a release
+# is always something someone decided to do.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish a release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Checked before anything is built. A tag that disagrees with versionName publishes
+      # an APK reporting the wrong version and cannot be corrected afterwards, and a
+      # missing notes file otherwise fails at the last step, after a full build has run.
+      - name: Check the tag against the source
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES="docs/releasenote/release_notes_${GITHUB_REF_NAME}.md"
+
+          if [ ! -f "$NOTES" ]; then
+            echo "::error::$NOTES does not exist. Write the release notes before tagging."
+            exit 1
+          fi
+
+          DECLARED=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n 1)
+          if [ -z "$DECLARED" ]; then
+            echo "::error::Could not read versionName out of app/build.gradle.kts."
+            exit 1
+          fi
+          if [ "$DECLARED" != "$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME says $VERSION, app/build.gradle.kts says $DECLARED."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches versionName $DECLARED."
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore the signing key
+        shell: bash
+        env:
+          RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        run: |
+          if [ -z "$RELEASE_KEYSTORE" ]; then
+            echo "::error::RELEASE_KEYSTORE is not set. Nothing can be signed."
+            exit 1
+          fi
+          echo "$RELEASE_KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Tests
+        shell: bash
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Cache the bundled Blue Marble tiles
+        uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/bluemarble
+          key: bluemarble-${{ hashFiles('tools/fetch_bluemarble.py') }}
+      - name: Fetch the bundled Blue Marble tiles (NASA, public domain)
+        shell: bash
+        run: python3 tools/fetch_bluemarble.py app/src/main/assets/bluemarble 2>&1 | tee bluemarble.log
+      - name: Build
+        shell: bash
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Publish
+        shell: bash
+        env:
+          # A release published with the built-in token is credited to
+          # github-actions[bot], and a release author cannot be changed afterwards.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "::error::No APK was produced."
+            exit 1
+          fi
+          NAMED="SonderEye-$VERSION.apk"
+          cp "$APK" "$NAMED"
+
+          gh release create "$GITHUB_REF_NAME" "$NAMED" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "SonderEye $VERSION" \
+            --notes-file docs/releasenote/release_notes_$GITHUB_REF_NAME.md
+
+      - name: Report the failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          # CI logs are not fetchable from outside, so the error is attached to a
+          # pre-release called ci-failure in this repository, where the API can read it.
+          gradle --no-daemon assembleRelease > out.txt 2>&1 || true
+          # A failed tile download shows here too.
+          [ -f bluemarble.log ] && tail -n 30 bluemarble.log >> out.txt
+          gh release view ci-failure --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create ci-failure --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Last CI failure" --notes "Replaced on every failed build."
+          echo "$GITHUB_WORKFLOW on $GITHUB_REF_NAME at $GITHUB_SHA" | cat - out.txt > failure.txt
+          gh release upload ci-failure failure.txt --repo "$GITHUB_REPOSITORY" --clobber
