@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -67,8 +68,10 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -546,22 +549,43 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         modifier
             .background(Palette.panel, shape)
             .border(1.dp, if (problems > 0) Palette.error else Palette.line, shape)
-            .clickable { open = !open }
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .animateContentSize(),
     ) {
         val l = state.layers
         fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
-            if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights") { actions.openList("flights") }
-            if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites") { actions.openList("sats") }
-            if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships") { actions.openList("ships") }
-            if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
-            if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
-            if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
-            if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
-            if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
+        // The keys, and top right a small button that opens the details under them.
+        Box {
+            FlowRow(
+                Modifier.padding(end = 30.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
+                if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights") { actions.openList("flights") }
+                if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites") { actions.openList("sats") }
+                if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships") { actions.openList("ships") }
+                if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
+                if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
+                if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
+                if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
+                if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
+            }
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-4).dp)
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (open) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
+                    .clickable { open = !open },
+                Alignment.Center,
+            ) {
+                Icon(
+                    if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (open) "Hide the details" else "Show the details",
+                    tint = Palette.signal, modifier = Modifier.size(22.dp),
+                )
+            }
         }
         val g = state.globeStatus
         if (g != null && g.loading > 0 && g.failures == 0) {
@@ -571,7 +595,8 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         if (problems > 0 && !open) {
             Text(
                 if (problems == 1) "1 problem. Tap for details." else "$problems problems. Tap for details.",
-                color = Palette.error, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp),
+                color = Palette.error, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 6.dp).clickable { open = true },
             )
         }
         state.following?.let { hex ->
