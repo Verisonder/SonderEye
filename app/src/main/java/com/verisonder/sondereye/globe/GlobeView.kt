@@ -114,6 +114,12 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         requestRender()
     }
 
+    /** One route drawn bold over the map (a picked bus line); null clears it. */
+    fun setHighlight(set: RoadSet?) {
+        renderer.highlight = set
+        requestRender()
+    }
+
     /** A satellite's orbit, or null to clear it. */
     fun setPath(points: List<com.verisonder.sondereye.core.V3>?) =
         setLines("orbit", if (points == null) emptyList() else listOf(GlobeLine(points, 0xFF4FC3F7.toInt())))

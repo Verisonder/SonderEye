@@ -1031,7 +1031,7 @@ class MainActivity : ComponentActivity() {
                 is Net.Outcome.Ok -> {
                     val set = withContext(Dispatchers.Default) {
                         val origin = Geo.ecef(c[0], c[1])
-                        RoadSet(origin, com.verisonder.sondereye.core.OsmRoads.ribbons(out.value, origin, ROAD_LIFT_M))
+                        RoadSet(origin, com.verisonder.sondereye.core.OsmRoads.ribbons(out.value, origin, ROAD_LIFT_M), com.verisonder.sondereye.globe.GlobeRenderer.ROAD_PASSES)
                     }
                     if (!roadsWanted()) return@run
                     roadArea.centre = doubleArrayOf(c[0], c[1], r)
@@ -1072,6 +1072,7 @@ class MainActivity : ComponentActivity() {
             state.busStops = emptyList()
             stopsShown = false
             globe?.setLayer("busStops", emptyList())
+            globe?.setHighlight(null)
             clear(state.busLines, "busLines", "bl:")
             if (state.selected?.key?.startsWith("bs:") == true) select(null)
             drawBusLines()
@@ -1134,29 +1135,45 @@ class MainActivity : ComponentActivity() {
                 pts.add(Geo.ecef(seg[i][0], seg[i][1], BUS_LINE_LIFT_M))
                 pts.add(Geo.ecef(seg[i + 1][0], seg[i + 1][1], BUS_LINE_LIFT_M))
             }
-            val alpha = when {
-                sel == null -> 0.8f
-                l.id == sel -> 1f
-                else -> 0.25f
-            }
-            GlobeLine(pts, busColour(l), alpha, pairs = true)
+            // A picked line is drawn on its own, bold (below); the rest step back behind it.
+            val alpha = if (sel == null) 0.85f else 0.12f
+            GlobeLine(pts, 0xFF000000.toInt() or l.shown, alpha, pairs = true)
         }
-        // The selected line last, so it is drawn over the others.
-        globe?.setLines("busLines", lines.sortedBy { if (it.alpha == 1f) 1 else 0 })
+        globe?.setLines("busLines", if (sel == null) lines else lines.filterIndexed { i, _ -> state.busLines.items[i].id != sel })
+        // The picked route: a dark edge and its colour, wide, over the map and the other lines.
+        val picked = state.busLines.items.firstOrNull { it.id == sel }
+        globe?.setHighlight(picked?.let { l ->
+            val pts = l.paths.flatten()
+            val mid = pts.getOrNull(pts.size / 2) ?: return@let null
+            val origin = Geo.ecef(mid[0], mid[1])
+            val ribbons = com.verisonder.sondereye.core.OsmRoads.ribbons(l.paths.map { com.verisonder.sondereye.core.Road(0, it) }, origin, 6.0)
+            RoadSet(origin, ribbons, listOf(
+                com.verisonder.sondereye.globe.RibbonPass(0, 9f, 0x0A0F0C, 0.9f),
+                com.verisonder.sondereye.globe.RibbonPass(0, 5f, l.shown, 1f),
+            ))
+        })
+        showBusStops(force = true)
     }
-
-    private fun busColour(l: BusLine) = l.colour?.let { 0xFF000000.toInt() or it } ?: Palette.bus.toArgb()
 
     private var stopsShown = false
 
     /** Stops only close in: a city's worth of dots from higher up is noise. */
-    private fun showBusStops() {
+    /**
+     * Stops close in; with a line picked, only its stops, larger and in its colour, at any
+     * height where its route shows.
+     */
+    private fun showBusStops(force: Boolean = false) {
         val alt = globe?.center()?.get(2) ?: return
-        val want = state.layers.busLines && alt <= BUS_STOPS_MAX_ALT
-        if (want == stopsShown) return
+        val picked = (state.selected as? Sel.OfBusLine)?.l
+        val want = state.layers.busLines && (alt <= BUS_STOPS_MAX_ALT || picked != null)
+        if (want == stopsShown && !force) return
         stopsShown = want
-        globe?.setLayer("busStops", if (!want) emptyList() else state.busStops.map { s ->
-            Marker("bs:" + s.id, s.lat, s.lon, 9f * density, Palette.busStop.toArgb())
+        globe?.setLayer("busStops", when {
+            !want -> emptyList()
+            picked != null -> state.busStops.filter { it.id in picked.stopIds }.map { s ->
+                Marker("bs:" + s.id, s.lat, s.lon, 12f * density, 0xFF000000.toInt() or picked.shown)
+            }
+            else -> state.busStops.map { s -> Marker("bs:" + s.id, s.lat, s.lon, 9f * density, Palette.busStop.toArgb()) }
         })
     }
 

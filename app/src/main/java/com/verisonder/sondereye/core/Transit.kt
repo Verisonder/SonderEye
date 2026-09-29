@@ -21,12 +21,25 @@ class BusLine(
     /** Stops in order (platforms when mapped, else stop positions). */
     val stopIds: List<Long>,
 ) {
+    /**
+     * 0xRRGGBB to draw it in: its own colour from OpenStreetMap, or else one of a set of
+     * clearly different colours picked by its number, so neighbouring lines stand apart
+     * (and both directions of a line share one).
+     */
+    val shown: Int get() = colour ?: LINE_COLOURS[Math.floorMod((ref ?: name ?: id.toString()).hashCode(), LINE_COLOURS.size)]
+
     /** "L1" or the name: what a person calls it. */
     val short: String get() = ref ?: name ?: "Bus line"
 
     /** "Beni Makada → Boukhalef", or the name when the ends are not mapped. */
     val route: String get() = if (from != null && to != null) "$from → $to" else name ?: ""
 }
+
+/** Twelve colours that stay apart from each other and from the satellite picture. */
+private val LINE_COLOURS = intArrayOf(
+    0xFF5A5A, 0x4FC3F7, 0xFFD54F, 0xBA68C8, 0x81C784, 0xFF8A65,
+    0x4DD0E1, 0xF06292, 0xAED581, 0x9575CD, 0xFFB74D, 0x64B5F6,
+)
 
 class BusStop(val id: Long, val lat: Double, val lon: Double, val name: String?, val lineIds: List<Long>)
 

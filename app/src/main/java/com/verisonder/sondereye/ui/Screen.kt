@@ -1153,7 +1153,7 @@ private fun ColumnScope.BusStopBody(s: BusStop, state: EyeState, actions: Action
             Modifier.fillMaxWidth().clickable { actions.goTo(Sel.OfBusLine(l)) }.padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(10.dp).background(l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus, CircleShape))
+            Box(Modifier.size(10.dp).background(Color(0xFF000000 or l.shown.toLong()), CircleShape))
             Spacer(Modifier.width(8.dp))
             Text(l.short, color = Palette.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(8.dp))
@@ -1166,7 +1166,7 @@ private fun ColumnScope.BusStopBody(s: BusStop, state: EyeState, actions: Action
 
 @Composable
 private fun ColumnScope.BusLineBody(l: BusLine, state: EyeState, context: Context, onClose: () -> Unit) {
-    val colour = l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus
+    val colour = Color(0xFF000000 or l.shown.toLong())
     Header(null, colour, "Line ${l.short}", l.route, onClose, Sym.DOT)
     val stops = l.stopIds.mapNotNull { id -> state.busStops.firstOrNull { it.id == id } }
     Line(listOfNotNull(l.network ?: l.operator, if (stops.isEmpty()) null else "${stops.size} stops in view").joinToString(", ").ifEmpty { "Bus line" })
@@ -1388,7 +1388,7 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
                 c.count.toDouble(), -(c.name.firstOrNull()?.code ?: 0).toDouble())
         })
         "busLines" -> Triple("Bus lines", "Number" to "Stops", state.busLines.items.mapIndexed { i, l ->
-            ListRow(Sel.OfBusLine(l), Sym.DOT, l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus, "Line ${l.short}",
+            ListRow(Sel.OfBusLine(l), Sym.DOT, Color(0xFF000000 or l.shown.toLong()), "Line ${l.short}",
                 l.route.ifEmpty { l.network ?: "" }, -i.toDouble(), l.stopIds.size.toDouble())
         })
         "buses" -> Triple("Live buses", "Route" to "Latest report", state.buses.items.sortedBy { it.routeId?.padStart(6, '0') ?: "~" }.mapIndexed { i, b ->

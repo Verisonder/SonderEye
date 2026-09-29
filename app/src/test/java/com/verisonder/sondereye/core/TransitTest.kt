@@ -37,6 +37,10 @@ class TransitTest {
         assertEquals("Place de France", pf.name)
         assertEquals(listOf(6304295L, 7L), pf.lineIds)
         assertTrue(net.stops.none { it.id == 10L })
+        assertEquals(0xE30613, l1.shown) // its own colour wins
+        fun line(id: Long, ref: String?) = BusLine(id, ref, null, null, null, null, null, null, emptyList(), emptyList())
+        assertEquals(line(1, "L9A").shown, line(2, "L9A").shown) // both directions alike
+        assertTrue((1..12).map { line(it.toLong(), "L$it").shown }.toSet().size >= 6) // neighbours differ
         assertEquals(0xFF0000, BusLines.colour("#f00"))
         assertNull(BusLines.colour("red"))
     }

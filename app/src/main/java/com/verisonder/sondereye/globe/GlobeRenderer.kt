@@ -46,8 +46,14 @@ class Marker(
 }
 
 /** A line through world space (an orbit, a flight's trail), metres. */
-/** Street roads ready for the GPU: ribbons per class around one origin (see [OsmRoads.ribbons]). */
-class RoadSet(val origin: V3, val ribbons: Array<FloatArray>)
+/** One pass over a ribbon array: which array, how wide on screen (dp), colour, opacity. */
+class RibbonPass(val index: Int, val widthDp: Float, val rgb: Int, val alpha: Float)
+
+/**
+ * Bands of fixed screen width, ready for the GPU: ribbon arrays around one origin (see
+ * [OsmRoads.ribbons]), drawn in the order of [passes].
+ */
+class RoadSet(val origin: V3, val ribbons: Array<FloatArray>, val passes: List<RibbonPass>)
 
 /** A polyline; with [pairs], separate segments (each two points), all in one draw. */
 class GlobeLine(val points: List<V3>, val rgb: Int, val alpha: Float = 1f, val pairs: Boolean = false)
@@ -85,6 +91,8 @@ class GlobeRenderer(
      */
     @Volatile var roads: RoadSet? = null
     @Volatile var roadsMaxAlt: Double = 0.0
+    /** One route shown on its own, bold, over everything but the markers (a picked bus line). */
+    @Volatile var highlight: RoadSet? = null
 
     /** Shade the night side (and show night lights where that overlay is on). */
     @Volatile var dayNight: Boolean = false
@@ -149,6 +157,7 @@ class GlobeRenderer(
         pathVbo = 0
         quadVbo2 = 0
         roadVbos = IntArray(0); roadCounts = IntArray(0); roadsUploaded = null
+        hlVbos = IntArray(0); hlCounts = IntArray(0); hlUploaded = null
         broken = false
         try {
             tileProg = program(TILE_VS, TILE_FS, "imagery")
@@ -331,6 +340,12 @@ class GlobeRenderer(
         drawCaps(view, uMvp, uHasTex, uColor, uCenter)
         GLES30.glUniform1f(uShade, 0f) // lines keep their colour day and night
         drawLines(view, uMvp, uHasTex, uColor, uAlpha, uCenter)
+        highlight?.let { set ->
+            // Lifted 6 m, so the ground never hides it, while the far side of the Earth still does.
+            val (v, c) = drawRibbons(view, set, hlUploaded, hlVbos, hlCounts)
+            hlVbos = v; hlCounts = c; hlUploaded = set
+            GLES30.glUseProgram(tileProg)
+        }
         drawMarkers(view)
         trimTextures()
         trim(meshes, MESH_CAP) { GLES30.glDeleteBuffers(1, intArrayOf(it), 0) }
@@ -598,22 +613,35 @@ class GlobeRenderer(
     private var roadCounts = IntArray(0)
     private var roadsUploaded: RoadSet? = null
 
+    private var hlVbos = IntArray(0)
+    private var hlCounts = IntArray(0)
+    private var hlUploaded: RoadSet? = null
+
     private fun drawRoads(view: com.verisonder.sondereye.core.View) {
         val set = roads
         if (set == null || view.cam.alt > roadsMaxAlt) return
-        if (set !== roadsUploaded) {
-            if (roadVbos.isNotEmpty()) GLES30.glDeleteBuffers(roadVbos.size, roadVbos, 0)
-            roadVbos = IntArray(set.ribbons.size)
-            GLES30.glGenBuffers(roadVbos.size, roadVbos, 0)
-            roadCounts = IntArray(set.ribbons.size)
+        val (v, c) = drawRibbons(view, set, roadsUploaded, roadVbos, roadCounts)
+        roadVbos = v; roadCounts = c; roadsUploaded = set
+    }
+
+    /** Draws [set], uploading it first when it is not the one [uploaded]; returns its buffers. */
+    private fun drawRibbons(
+        view: com.verisonder.sondereye.core.View, set: RoadSet, uploaded: RoadSet?, vbos0: IntArray, counts0: IntArray,
+    ): Pair<IntArray, IntArray> {
+        var vbos = vbos0
+        var counts = counts0
+        if (set !== uploaded) {
+            if (vbos.isNotEmpty()) GLES30.glDeleteBuffers(vbos.size, vbos, 0)
+            vbos = IntArray(set.ribbons.size)
+            GLES30.glGenBuffers(vbos.size, vbos, 0)
+            counts = IntArray(set.ribbons.size)
             for ((i, f) in set.ribbons.withIndex()) {
-                GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, roadVbos[i])
+                GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbos[i])
                 val buf = ByteBuffer.allocateDirect(maxOf(4, f.size * 4)).order(ByteOrder.nativeOrder())
                 buf.asFloatBuffer().put(f)
                 GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, f.size * 4, buf, GLES30.GL_STATIC_DRAW)
-                roadCounts[i] = f.size / OsmRoads.FLOATS_PER_VERTEX
+                counts[i] = f.size / OsmRoads.FLOATS_PER_VERTEX
             }
-            roadsUploaded = set
         }
         GLES30.glUseProgram(roadProg)
         M4.toFloat(view.mvp(set.origin), mvp)
@@ -624,21 +652,21 @@ class GlobeRenderer(
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
         GLES30.glDepthMask(false)
-        // Minor roads first, so the main roads are drawn over them where they meet.
-        for (c in roadVbos.indices.reversed()) {
-            if (roadCounts[c] == 0) continue
-            val st = ROAD_STYLE[c]
-            GLES30.glUniform1f(uWidth, st.first * density)
-            val rgb = st.second
-            GLES30.glUniform4f(uColor, ((rgb shr 16) and 255) / 255f, ((rgb shr 8) and 255) / 255f, (rgb and 255) / 255f, ROAD_ALPHA)
-            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, roadVbos[c])
+        for (p in set.passes) {
+            val c = p.index
+            if (c !in vbos.indices || counts[c] == 0) continue
+            GLES30.glUniform1f(uWidth, p.widthDp * density)
+            val rgb = p.rgb
+            GLES30.glUniform4f(uColor, ((rgb shr 16) and 255) / 255f, ((rgb shr 8) and 255) / 255f, (rgb and 255) / 255f, p.alpha)
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbos[c])
             val stride = OsmRoads.FLOATS_PER_VERTEX * 4
             GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, stride, 0)
             GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 3, GLES30.GL_FLOAT, false, stride, 12)
             GLES30.glEnableVertexAttribArray(2); GLES30.glVertexAttribPointer(2, 1, GLES30.GL_FLOAT, false, stride, 24)
-            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, roadCounts[c])
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, counts[c])
         }
         GLES30.glDisableVertexAttribArray(2)
+        return vbos to counts
     }
     private var lineScratch = FloatArray(0)
 
@@ -793,6 +821,9 @@ class GlobeRenderer(
             5.5f to 0xF2A07A, 4.5f to 0xF5B794, 4f to 0xF7C9A8, 3.5f to 0xF3DDBA, 2.6f to 0xEFE3C8, 1.6f to 0xE2D8C6,
         )
         private const val ROAD_ALPHA = 0.9f
+
+        /** Minor roads first, so the main roads are drawn over them where they meet. */
+        val ROAD_PASSES = ROAD_STYLE.indices.reversed().map { RibbonPass(it, ROAD_STYLE[it].first, ROAD_STYLE[it].second, ROAD_ALPHA) }
 
         /** A road band: each vertex pushed sideways (and past its end, to close the joins) in pixels. */
         private const val ROAD_VS = """#version 300 es
