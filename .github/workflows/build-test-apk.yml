@@ -2,7 +2,8 @@ name: Test APK
 
 on:
   push:
-    branches: ['test/**']
+    # test/windows is the Windows app's branch: its builds are in build-windows.yml.
+    branches: ['test/**', '!test/windows']
 
 permissions:
   contents: write

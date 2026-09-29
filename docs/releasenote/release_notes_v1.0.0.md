@@ -16,3 +16,10 @@ The first release of SonderEye: the planet's live traffic on a native 3D globe, 
 **Notes**
 - Android 8.0 or newer. No account and no server of ours; keys and settings stay on the phone.
 - Optional free keys (ships, webcams, fires, live buses, written summaries) go in the menu's API keys section.
+
+**Windows (new)**
+- SonderEye now also runs on Windows 10 and 11 as a native app: the same globe, layers, panels and data, from the same code.
+- `SonderEye-1.0.0-Setup.exe` installs it (no administrator rights needed); `SonderEye-1.0.0-Portable.zip` runs from a folder without installing.
+- Mouse: drag to move, wheel to zoom, right-drag to turn, right-click for the weather and to set your place. Touchpad: slide two fingers to move, pinch to zoom. F11 leaves full screen.
+- Your place comes from your internet connection until you set it. The sky view and bus riding are phone-only.
+- The .exe is not code-signed: Windows SmartScreen asks once ("More info", then "Run anyway").
