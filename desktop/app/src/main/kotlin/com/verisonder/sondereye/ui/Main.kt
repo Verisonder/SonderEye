@@ -34,8 +34,8 @@ fun main() {
 
 private fun window() = application {
     val app = remember { arrayOfNulls<MainActivity>(1) }
-    // Opens filling the screen: a fixed size ran off smaller screens.
-    val window = rememberWindowState(placement = WindowPlacement.Maximized, width = 1440.dp, height = 900.dp)
+    // Opens full screen, with no title bar; F11 switches to a normal window and back.
+    val window = rememberWindowState(placement = WindowPlacement.Fullscreen, width = 1440.dp, height = 900.dp)
     Window(
         onCloseRequest = {
             app[0]?.close()
@@ -45,7 +45,18 @@ private fun window() = application {
         icon = painterResource("icon.png"),
         state = window,
         // Escape does what the phone's back button does: closes the panel or card on top.
-        onPreviewKeyEvent = { e -> e.type == KeyEventType.KeyDown && e.key == Key.Escape && Back.press() },
+        onPreviewKeyEvent = { e ->
+            when {
+                e.type != KeyEventType.KeyDown -> false
+                e.key == Key.F11 -> {
+                    window.placement =
+                        if (window.placement == WindowPlacement.Fullscreen) WindowPlacement.Maximized else WindowPlacement.Fullscreen
+                    true
+                }
+                e.key == Key.Escape -> Back.press()
+                else -> false
+            }
+        },
     ) {
         val scope = rememberCoroutineScope()
         // The phone's layout, a quarter larger: a PC screen is further from the eye.

@@ -108,7 +108,8 @@ compiled straight from `app/src/main/java`, so both behave the same.
   `SonderEye.exe` that runs from anywhere. Both include their own Java runtime.
 - **Mouse**: drag to move, wheel to zoom at the pointer, right-drag to turn, click to pick,
   double-click to zoom in, right-click (or hold still a second) for the weather there and
-  to set it as your place. Escape closes the panel or card on top.
+  to set it as your place. Escape closes the panel or card on top. It opens full screen; F11
+  switches to a normal window and back (Alt+F4 closes it).
 - **Your place**: a PC has no GPS, so it comes from your internet connection (to a few km)
   unless you set it yourself; your own place always wins.
 - **ISS pass alerts** are Windows notifications, while the app is open.
