@@ -117,22 +117,6 @@ compiled straight from `app/src/main/java`, so both behave the same.
 - The installer is not code-signed: Windows SmartScreen asks once ("More info", then
   "Run anyway").
 
-## Windows
-
-SonderEye also runs on Windows 10 and 11, as a real app (not a web page): the same globe,
-layers, panels and data, from the same code (`desktop/`, which builds the Android app's
-`core/` and data code directly). Get `SonderEye-<version>-Setup.exe` to install it, or
-`SonderEye-<version>-Portable.zip` to run it from a folder without installing, from
-[Releases](https://github.com/Verisonder/SonderEye/releases/latest).
-
-On a PC: drag to move, the mouse wheel zooms where the pointer is, right-drag turns the map,
-double-click zooms in, and right-click (or a still one-second press) shows the weather at that
-spot, with **Set as my place**. A PC has no GPS: your place comes from your internet
-connection (to a few km) until you set it. Escape closes the panel or card on top. The sky
-view and bus riding need a phone and are left out; ISS pass alerts come as Windows
-notifications while the app is open. The .exe is not code-signed, so Windows asks once
-before running it.
-
 ## Privacy
 
 No account, no server of ours, no analytics. The app asks each source directly for what it
@@ -151,9 +135,6 @@ gradle testDebugUnitTest
 
 Windows: `gradle -p desktop :app:run` to start it, `:app:packageExe` for the installer
 (JDK 17; WiX for the installer, as on GitHub's Windows machines).
-
-The Windows app: JDK 17 and Gradle 8.9, `gradle -p desktop :app:run` to run it,
-`gradle -p desktop :app:packageExe :app:createDistributable` for the installer and the folder.
 
 CI downloads the bundled Blue Marble tiles (`tools/fetch_bluemarble.py`, about 5,500 tiles,
 cached between runs) before building; a local build without them still works, just without
