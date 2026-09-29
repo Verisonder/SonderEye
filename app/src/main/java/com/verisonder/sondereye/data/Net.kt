@@ -20,6 +20,10 @@ object Net {
     fun <T> post(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
         request(url, what, source, body, emptyMap(), parse)
 
+    /** A JSON POST (Gemini). */
+    fun <T> postJson(url: String, json: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, json, mapOf("Content-Type" to "application/json"), parse)
+
     /** [what] names the source in messages ("Earthquakes", "Flights"…). */
     fun <T> get(url: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
         request(url, what, source, null, emptyMap(), parse)
@@ -45,13 +49,19 @@ object Net {
             if (body != null) {
                 conn.requestMethod = "POST"
                 conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                if (headers.keys.none { it.equals("Content-Type", true) }) {
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                }
                 conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
             val code = conn.responseCode
             if (code == 429) return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)")
             if (code == 401 || code == 403) return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
-            if (code != 200) return Outcome.Failed("$what: $source answered HTTP $code")
+            if (code != 200) {
+                val detail = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
+                    ?.let { Regex("\"message\"\\s*:\\s*\"([^\"]{1,160})").find(it)?.groupValues?.get(1) }
+                return Outcome.Failed("$what: $source answered HTTP $code" + (detail?.let { " ($it)" } ?: ""))
+            }
             val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             try {
                 Outcome.Ok(parse(text))

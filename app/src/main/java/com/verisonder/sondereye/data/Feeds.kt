@@ -3,6 +3,10 @@ package com.verisonder.sondereye.data
 import com.verisonder.sondereye.core.Adsb
 import com.verisonder.sondereye.core.Eonet
 import com.verisonder.sondereye.core.Firms
+import com.verisonder.sondereye.core.Gemini
+import com.verisonder.sondereye.core.News
+import com.verisonder.sondereye.core.NewsSource
+import com.verisonder.sondereye.core.Story
 import com.verisonder.sondereye.core.ForecastApi
 import com.verisonder.sondereye.core.Windy
 import com.verisonder.sondereye.core.Lookup
@@ -39,6 +43,19 @@ object Feeds {
     fun callsign(cs: String) = Net.get(Lookup.callsignUrl(cs), "Search", "adsb.lol", Adsb::parse)
 
     fun satellitesNamed(q: String) = Net.get(Lookup.satelliteUrl(q), "Search", "CelesTrak") { Tle.parseAll(it) }
+
+    fun news(src: NewsSource) = Net.get(src.url, "News", src.name) { News.parseRss(src.name, it) }
+
+    /** Tries each Gemini model name in turn: names change, the first that exists wins. */
+    fun brief(key: String, stories: List<Story>, weather: String?, place: String?): Net.Outcome<String> {
+        var last: Net.Outcome<String> = Net.Outcome.Failed("Brief: no Gemini model answered")
+        for (m in Gemini.MODELS) {
+            last = Net.postJson(Gemini.url(m, key), Gemini.request(stories, weather, place), "Brief", "Gemini", Gemini::parse)
+            if (last is Net.Outcome.Ok) return last
+            if (last is Net.Outcome.Failed && "HTTP 404" !in last.message) return last
+        }
+        return last
+    }
 
     fun webcams(key: String, lat: Double, lon: Double, radiusKm: Int) =
         Net.getWith(Windy.url(lat, lon, radiusKm), mapOf("x-windy-api-key" to key.trim()), "Webcams", "Windy", Windy::parse)

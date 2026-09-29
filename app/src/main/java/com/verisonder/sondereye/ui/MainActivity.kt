@@ -26,7 +26,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.verisonder.sondereye.core.Ais
 import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.Hotspot
+import com.verisonder.sondereye.core.News
 import com.verisonder.sondereye.core.Ship
+import com.verisonder.sondereye.core.Story
 import com.verisonder.sondereye.core.Webcam
 import com.verisonder.sondereye.core.EARTH_R
 import com.verisonder.sondereye.core.Forecast
@@ -56,12 +58,14 @@ import com.verisonder.sondereye.globe.GlobeStatus
 import com.verisonder.sondereye.globe.GlobeView
 import com.verisonder.sondereye.globe.Marker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import kotlin.math.roundToInt
 
 /** One layer's download state. */
 class Feed<T> {
@@ -104,6 +108,20 @@ sealed class Hit(val title: String, val detail: String) {
     class OfSat(val s: Sgp4) : Hit(s.tle.name, "Satellite, NORAD ${s.tle.norad}")
 }
 
+/** The day's brief: weather where you are, the top stories, and an optional written summary. */
+class BriefState {
+    var open by mutableStateOf(false)
+    var loading by mutableStateOf(false)
+    var weather by mutableStateOf<Weather?>(null)
+    var forecast by mutableStateOf<Forecast?>(null)
+    var weatherProblem by mutableStateOf<String?>(null)
+    var stories by mutableStateOf<List<Story>>(emptyList())
+    var newsProblems by mutableStateOf<List<String>>(emptyList())
+    var summary by mutableStateOf<String?>(null)
+    var summaryProblem by mutableStateOf<String?>(null)
+    var loadedAt = 0L
+}
+
 class SearchState {
     var open by mutableStateOf(false)
     var query by mutableStateOf("")
@@ -142,6 +160,9 @@ class EyeState {
     /** Hex of the aircraft the camera follows. */
     var following by mutableStateOf<String?>(null)
     val search = SearchState()
+    val brief = BriefState()
+    /** Every source in use, for the menu's list (the screen shows only the required ones). */
+    var allCredits by mutableStateOf<List<String>>(emptyList())
     /** Time of the radar frame on screen. */
     var radarFrameAt by mutableStateOf<Long?>(null)
     /** Bytes of map tiles on the phone (shown in the menu). */
@@ -271,6 +292,16 @@ class MainActivity : ComponentActivity() {
                         clearCache = ::clearCache,
                         measureCache = ::measureCache,
                         northUp = { globe?.northUp() },
+                        brief = { open ->
+                            state.brief.open = open
+                            if (open) {
+                                state.layersOpen = false
+                                state.search.open = false
+                                // Reuse a brief less than 20 minutes old.
+                                if (System.currentTimeMillis() - state.brief.loadedAt > 20 * 60_000L) loadBrief()
+                            }
+                        },
+                        reloadBrief = ::loadBrief,
                         saveKeys = { k ->
                             store.saveKeys(k)
                             state.keys = store.keys()
@@ -359,6 +390,7 @@ class MainActivity : ComponentActivity() {
         ) applyMap()
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
+        if (new.credits != old.credits || new.cameras != old.cameras) applyMap()
         if (new.ships != old.ships && !new.ships) closeShips()
         if (new.webcams != old.webcams) loadWebcams(force = true)
         if (new.fires != old.fires) loadFires(force = true)
@@ -411,7 +443,71 @@ class MainActivity : ComponentActivity() {
         }
         globe?.setMap(base, overlays)
         globe?.setDayNight(l.dayNight)
-        state.credits = (listOf(base) + overlays + TileSource.BLUE_MARBLE).map { it.credit }.distinct()
+        applyCredits(base, overlays)
+    }
+
+    /**
+     * Esri, RainViewer and OpenStreetMap require credit where their data is shown; NASA
+     * only asks. The screen shows the required ones (when the setting is on); the menu
+     * lists everything.
+     */
+    private fun applyCredits(base: TileSource, overlays: List<TileSource>) {
+        val shown = listOf(base) + overlays
+        val all = (shown + TileSource.BLUE_MARBLE).map { it.credit }.toMutableList()
+        val required = shown.filter { it.id.startsWith("esri") || it.id.startsWith("rain") }.map { it.credit }.toMutableList()
+        if (state.layers.cameras || state.search.searched) {
+            all.add("© OpenStreetMap contributors"); required.add("© OpenStreetMap contributors")
+        }
+        state.allCredits = all.distinct()
+        state.credits = if (state.layers.credits) required.distinct() else emptyList()
+    }
+
+    // ---- Daily brief --------------------------------------------------------------------
+
+    private fun loadBrief() {
+        val b = state.brief
+        b.loading = true
+        b.newsProblems = emptyList()
+        b.summary = null
+        b.summaryProblem = null
+        run("brief") {
+            // Weather where you are (or where you last were).
+            val here = state.me?.let { doubleArrayOf(it.latitude, it.longitude) } ?: store.home()
+            if (here == null) {
+                b.weatherProblem = "Weather: your location is not known yet. Tap the pin once, then open this again."
+            } else {
+                when (val w = withContext(Dispatchers.IO) { Feeds.forecast(here[0], here[1]) }) {
+                    is Net.Outcome.Ok -> { b.weather = w.value.first; b.forecast = w.value.second; b.weatherProblem = null }
+                    is Net.Outcome.Failed -> b.weatherProblem = w.message
+                }
+            }
+            // Every feed at once; one failing does not stop the others.
+            val results = withContext(Dispatchers.IO) {
+                News.SOURCES.map { src -> async { Feeds.news(src) } }.map { it.await() }
+            }
+            val stories = ArrayList<Story>()
+            val problems = ArrayList<String>()
+            for (r in results) when (r) {
+                is Net.Outcome.Ok -> stories.addAll(r.value)
+                is Net.Outcome.Failed -> problems.add(r.message)
+            }
+            b.stories = News.today(stories, System.currentTimeMillis())
+            b.newsProblems = problems
+            b.loadedAt = System.currentTimeMillis()
+            b.loading = false
+            // The written brief, only with the user's own Gemini key.
+            val key = state.keys.gemini
+            if (key.isNotEmpty() && b.stories.isNotEmpty()) {
+                val weatherLine = b.weather?.let { w ->
+                    val d = b.forecast?.days?.firstOrNull()
+                    "${w.tempC.roundToInt()} °C now, ${w.description.lowercase()}" + (d?.let { ", high ${it.maxC.roundToInt()} °C, low ${it.minC.roundToInt()} °C" } ?: "")
+                }
+                when (val s = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null) }) {
+                    is Net.Outcome.Ok -> b.summary = s.value
+                    is Net.Outcome.Failed -> b.summaryProblem = s.message
+                }
+            }
+        }
     }
 
     private fun loadRadar() {

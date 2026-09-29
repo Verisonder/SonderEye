@@ -48,10 +48,12 @@ data class Layers(
     val ships: Boolean = false,
     val webcams: Boolean = false,
     val fires: Boolean = false,
+    /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
+    val credits: Boolean = true,
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
-data class Keys(val ais: String = "", val windy: String = "", val firms: String = "")
+data class Keys(val ais: String = "", val windy: String = "", val firms: String = "", val gemini: String = "")
 
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -80,6 +82,7 @@ class Settings(context: Context) {
             ships = prefs.getBoolean("ships.enabled", d.ships),
             webcams = prefs.getBoolean("webcams.enabled", d.webcams),
             fires = prefs.getBoolean("fires.enabled", d.fires),
+            credits = prefs.getBoolean("map.credits", d.credits),
         )
     }
 
@@ -106,6 +109,7 @@ class Settings(context: Context) {
             .putBoolean("ships.enabled", s.ships)
             .putBoolean("webcams.enabled", s.webcams)
             .putBoolean("fires.enabled", s.fires)
+            .putBoolean("map.credits", s.credits)
             .apply()
     }
 
@@ -113,10 +117,11 @@ class Settings(context: Context) {
         prefs.getString("key.ais", "") ?: "",
         prefs.getString("key.windy", "") ?: "",
         prefs.getString("key.firms", "") ?: "",
+        prefs.getString("key.gemini", "") ?: "",
     )
 
     fun saveKeys(k: Keys) {
-        prefs.edit().putString("key.ais", k.ais.trim()).putString("key.windy", k.windy.trim()).putString("key.firms", k.firms.trim()).apply()
+        prefs.edit().putString("key.ais", k.ais.trim()).putString("key.windy", k.windy.trim()).putString("key.firms", k.firms.trim()).putString("key.gemini", k.gemini.trim()).apply()
     }
 
     /** Last known position, for pass alerts computed while the app is closed. */

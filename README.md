@@ -19,6 +19,9 @@ Test builds only.
 - **Surveillance cameras** and licence-plate readers mapped in OpenStreetMap.
 - **Weather forecast**: 12 hours and 3 days; the rain radar loops over the past hour.
 - **Map cache** size and a clear button in the menu.
+- **Today**: the weather where you are and the day's top stories (BBC World, Al Jazeera, Morocco World
+  News, from their public feeds), with an optional written summary by Google Gemini (your own free key).
+- Map credits can be hidden while the app is private (Esri, RainViewer and OpenStreetMap require them once public).
 - **Sky view**: point the phone at the sky to see satellites, aircraft, the Sun and the Moon labelled.
 - **ISS pass alerts**: a notification about 10 minutes before each pass you can see.
 - The whole Earth down to country scale ships inside the app (NASA Blue Marble, zoom 2 to 6),
@@ -50,6 +53,8 @@ Test builds only.
 | Ships | [AISStream](https://aisstream.io) live AIS over WebSocket | Free, GitHub sign-in |
 | Webcams | [Windy Webcams API](https://api.windy.com/webcams) | Free |
 | Fire hotspots | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov), VIIRS NOAA-20, last 24 h | Free, e-mail |
+| News | Publisher RSS feeds (BBC, Al Jazeera, Morocco World News) | None |
+| Written brief | [Google Gemini API](https://aistudio.google.com/apikey), optional | Free tier |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
 

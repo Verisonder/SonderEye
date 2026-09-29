@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -152,6 +153,9 @@ class Actions(
     val measureCache: () -> Unit,
     val saveKeys: (Keys) -> Unit,
     val northUp: () -> Unit,
+    /** Open (true) or close the day's brief. */
+    val brief: (Boolean) -> Unit,
+    val reloadBrief: () -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -168,8 +172,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
     }
 
-    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open) {
+    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open || state.brief.open) {
         when {
+            state.brief.open -> actions.brief(false)
             state.search.open -> state.search.open = false
             state.layersOpen -> state.layersOpen = false
             else -> actions.select(null)
@@ -197,7 +202,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 ScaleBar(v)
                 Text(position(v), color = Color.White, style = Figures.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium))
             }
-            Text(state.credits.joinToString(", "), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, maxLines = 2)
+            if (state.credits.isNotEmpty()) {
+                Text(state.credits.joinToString(", "), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, maxLines = 2)
+            }
         }
 
         Legend(
@@ -221,13 +228,17 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             Tool(Icons.Default.Menu, "Layers and settings", state.layersOpen) {
                 state.layersOpen = !state.layersOpen
                 state.search.open = false
+                state.brief.open = false
                 if (state.layersOpen) actions.measureCache()
             }
             ToolDivider()
             Tool(Icons.Default.Search, "Search", state.search.open) {
                 state.search.open = !state.search.open
                 state.layersOpen = false
+                state.brief.open = false
             }
+            ToolDivider()
+            Tool(Icons.Default.DateRange, "Today: weather and news", state.brief.open) { actions.brief(!state.brief.open) }
             ToolDivider()
             val busy = state.quakes.loading || state.events.loading || state.sats.loading ||
                 (state.flights.loading && state.flights.updatedAt == null)
@@ -273,6 +284,18 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             last.sel?.let { SelectionCard(it, state, now, actions) }
         }
 
+        if (state.brief.open) {
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(top = 12.dp, end = 76.dp, start = 12.dp)
+                    .widthIn(max = 460.dp)
+            ) {
+                BriefPanel(state, actions)
+            }
+        }
+
         if (state.search.open) {
             Box(
                 Modifier
@@ -293,7 +316,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(top = 12.dp, end = 72.dp, start = 12.dp)
             ) {
-                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys)
+                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys, state.allCredits)
             }
         }
     }
@@ -922,6 +945,96 @@ private fun weatherDetail(w: Weather): String = listOfNotNull(
     w.precipMm?.takeIf { it > 0 }?.let { "rain %.1f mm".format(it) },
 ).joinToString(", ").replaceFirstChar { it.uppercase() }
 
+// ---- Today --------------------------------------------------------------------------------------
+
+@Composable
+private fun BriefPanel(state: EyeState, actions: Actions) {
+    val b = state.brief
+    val context = LocalContext.current
+    Surface(
+        color = Palette.panel,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(18.dp)),
+    ) {
+        val maxH = (LocalConfiguration.current.screenHeightDp - 110).coerceAtLeast(240)
+        Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState()).padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(Date(state.clock)),
+                    color = Palette.text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { actions.brief(false) }) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
+            }
+
+            // Weather where you are.
+            val w = b.weather
+            when {
+                w != null -> {
+                    val d = b.forecast?.days?.firstOrNull()
+                    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 6.dp)) {
+                        Text("${w.tempC.roundToInt()}°", color = Palette.text, style = Figures.copy(fontSize = 44.sp, fontWeight = FontWeight.SemiBold))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.padding(bottom = 8.dp)) {
+                            Text(w.description, color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                            if (d != null) {
+                                Text(
+                                    "High ${d.maxC.roundToInt()}°, low ${d.minC.roundToInt()}°" + (d.rainChance?.let { ", rain $it%" } ?: ""),
+                                    color = Palette.dim, fontSize = 14.sp,
+                                )
+                            }
+                        }
+                    }
+                    Text(weatherDetail(w), color = Palette.dim, fontSize = 13.sp)
+                    b.forecast?.let { ForecastView(it) }
+                }
+                b.weatherProblem != null -> Text(b.weatherProblem!!, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                else -> Text("Getting the weather where you are…", color = Palette.dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Palette.line)
+
+            // The written brief (Gemini), when there is a key.
+            val summary = b.summary
+            when {
+                summary != null -> {
+                    Text(summary, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp)
+                    Text("Written by Gemini from the headlines below.", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                }
+                b.summaryProblem != null -> Text(b.summaryProblem!!, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp))
+                state.keys.gemini.isEmpty() && !b.loading -> Text(
+                    "Add a Google Gemini key in the menu, under API keys, for a written summary on top.",
+                    color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp),
+                )
+                state.keys.gemini.isNotEmpty() && b.stories.isNotEmpty() -> Text("Writing the summary…", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp))
+            }
+
+            if (b.loading) Text("Getting today's news…", color = Palette.dim, fontSize = 14.sp)
+            for (p in b.newsProblems) Text(p, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+            if (!b.loading && b.stories.isEmpty() && b.newsProblems.isEmpty() && b.loadedAt > 0) {
+                Text("No stories from the last 24 hours.", color = Palette.dim, fontSize = 14.sp)
+            }
+            for (st in b.stories) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = st.link.isNotEmpty()) { openUrl(context, st.link) }
+                        .padding(vertical = 9.dp),
+                ) {
+                    Text(st.title, color = Palette.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+                    if (st.summary.isNotEmpty()) Text(st.summary, color = Palette.dim, fontSize = 14.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 2.dp))
+                    Text(
+                        st.source + (st.timeMs?.let { ", " + Fmt.ago(it, state.clock).lowercase() } ?: ""),
+                        color = Palette.accent, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+            }
+            if (!b.loading) {
+                TextButton(onClick = actions.reloadBrief, modifier = Modifier.padding(top = 6.dp)) { Text("Refresh", color = Palette.accent) }
+            }
+        }
+    }
+}
+
 // ---- Search ----------------------------------------------------------------------------------
 
 @Composable
@@ -968,7 +1081,10 @@ private fun SearchPanel(se: SearchState, actions: Actions) {
 // ---- Layers panel ----------------------------------------------------------------------------
 
 @Composable
-private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, clearCache: () -> Unit, keys: Keys, saveKeys: (Keys) -> Unit) {
+private fun LayersPanel(
+    s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, clearCache: () -> Unit, keys: Keys, saveKeys: (Keys) -> Unit,
+    allCredits: List<String>,
+) {
     Surface(
         color = Palette.panel,
         shape = RoundedCornerShape(20.dp),
@@ -1047,6 +1163,15 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, 
             KeyField("AISStream", "Ships", keys.ais, "https://aisstream.io/apikeys") { saveKeys(keys.copy(ais = it)) }
             KeyField("Windy Webcams", "Webcams", keys.windy, "https://api.windy.com/keys") { saveKeys(keys.copy(windy = it)) }
             KeyField("NASA FIRMS", "Fire hotspots", keys.firms, "https://firms.modaps.eosdis.nasa.gov/api/map_key/") { saveKeys(keys.copy(firms = it)) }
+            KeyField("Google Gemini", "the written brief in Today", keys.gemini, "https://aistudio.google.com/apikey") { saveKeys(keys.copy(gemini = it)) }
+
+            Divider()
+            Toggle("Show map credits", s.credits, true) { change(s.copy(credits = it)) }
+            Text(
+                "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +
+                    "Sources in use: " + allCredits.joinToString(", ") + ".",
+                color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
+            )
 
             Divider()
             Row(verticalAlignment = Alignment.CenterVertically) {
