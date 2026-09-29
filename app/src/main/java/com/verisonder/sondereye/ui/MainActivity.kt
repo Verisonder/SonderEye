@@ -586,6 +586,7 @@ class MainActivity : ComponentActivity() {
         if (state.layers.cameras || state.layers.busLines || roadsWanted() || state.search.searched) {
             all.add("© OpenStreetMap contributors"); required.add("© OpenStreetMap contributors")
         }
+        if (roadsWanted()) all.add("Street roads: OpenFreeMap, © OpenMapTiles")
         state.allCredits = all.distinct()
         state.credits = if (state.layers.credits) required.distinct() else emptyList()
     }
@@ -1038,21 +1039,27 @@ class MainActivity : ComponentActivity() {
         val r = roadsRadius(c[2])
         val b = box(c, r, 1.0)
         run("roads") {
-            val out = withContext(Dispatchers.IO) { Feeds.roads(b[0], b[1], b[2], b[3]) }
-            roadsLoading = false
-            when (out) {
-                is Net.Outcome.Ok -> {
-                    val set = withContext(Dispatchers.Default) {
-                        val origin = Geo.ecef(c[0], c[1])
-                        RoadSet(origin, com.verisonder.sondereye.core.OsmRoads.ribbons(out.value, origin, ROAD_LIFT_M), com.verisonder.sondereye.globe.GlobeRenderer.ROAD_PASSES)
-                    }
-                    if (!roadsWanted()) return@run
-                    roadArea.centre = doubleArrayOf(c[0], c[1], r)
-                    state.roadsProblem = null
-                    globe?.setRoads(set, ROADS_VECTOR_ALT)
-                }
-                is Net.Outcome.Failed -> state.roadsProblem = out.message
+            // The vector tiles covering the view, all at once.
+            val tiles = com.verisonder.sondereye.core.RoadTiles.tilesFor(b[0], b[1], b[2], b[3]).take(MAX_ROAD_TILES)
+            val results = withContext(Dispatchers.IO) {
+                tiles.map { (x, y) -> async { Feeds.roadTile(cacheDir, x, y) } }.map { it.await() }
             }
+            roadsLoading = false
+            val roads = results.filterIsInstance<Net.Outcome.Ok<List<com.verisonder.sondereye.core.Road>>>().flatMap { it.value }
+            val failed = results.filterIsInstance<Net.Outcome.Failed>()
+            if (failed.size == results.size && failed.isNotEmpty()) {
+                state.roadsProblem = failed.first().message
+                return@run
+            }
+            val set = withContext(Dispatchers.Default) {
+                val origin = Geo.ecef(c[0], c[1])
+                RoadSet(origin, com.verisonder.sondereye.core.OsmRoads.ribbons(roads, origin, ROAD_LIFT_M), com.verisonder.sondereye.globe.GlobeRenderer.ROAD_PASSES)
+            }
+            if (!roadsWanted()) return@run
+            // Some tiles missing: show the rest, say so, and try the area again later.
+            roadArea.centre = if (failed.isEmpty()) doubleArrayOf(c[0], c[1], r) else null
+            state.roadsProblem = if (failed.isEmpty()) null else "${failed.first().message} (${failed.size} of ${results.size} road tiles)"
+            globe?.setRoads(set, ROADS_VECTOR_ALT)
         }
     }
 
@@ -1789,10 +1796,11 @@ class MainActivity : ComponentActivity() {
         /** Closer than this, the app draws the roads itself (Esri's layer has no lines there). */
         private const val ROADS_VECTOR_ALT = 3_500.0
         private const val ROAD_LIFT_M = 2.0
+        private const val MAX_ROAD_TILES = 36
         private const val BUS_LINES_MAX_ALT = 40_000.0
         /** Bus routes load by squares of the map this size (degrees), plus a margin, kept a week. */
-        private const val BUS_CELL_DEG = 0.25
-        private const val BUS_CELL_MARGIN = 0.05
+        private const val BUS_CELL_DEG = 0.15
+        private const val BUS_CELL_MARGIN = 0.03
         private const val BUS_CACHE_MS = 7 * 24 * 3_600_000L
         /** The globe starts its fly-in under the start-up screen and lands after it fades. */
         private const val BOOT_FLY_DELAY_MS = 1_100L
