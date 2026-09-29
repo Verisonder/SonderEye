@@ -65,6 +65,8 @@ data class Layers(
     val northLock: Boolean = false,
     /** Loop the radar over the past hour (six frames of imagery: heavier). */
     val radarLoop: Boolean = false,
+    /** How big the pins on the globe are, times their phone size (a PC screen is seen closer). */
+    val pinScale: Float = 0.7f,
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
@@ -107,6 +109,7 @@ class Settings {
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
             radarLoop = prefs.getBoolean("weather.radarLoop", d.radarLoop),
+            pinScale = (prefs.getString("ui.pinScale", null)?.toFloatOrNull() ?: d.pinScale),
         )
     }
 
@@ -142,6 +145,7 @@ class Settings {
             .putBoolean("ui.lightPanels", s.lightPanels)
             .putBoolean("ui.northLock", s.northLock)
             .putBoolean("weather.radarLoop", s.radarLoop)
+            .putString("ui.pinScale", s.pinScale.toString())
             .apply()
     }
 

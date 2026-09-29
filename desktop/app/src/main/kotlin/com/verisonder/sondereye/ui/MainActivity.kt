@@ -493,7 +493,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         if (new.satellites != old.satellites || new.satGroup != old.satGroup) loadSatellites()
         if (new.events != old.events) loadEvents()
         if (new.map != old.map || new.roads != old.roads || new.labels != old.labels ||
-            new.dayNight != old.dayNight || new.lights != old.lights
+            new.dayNight != old.dayNight || new.lights != old.lights || new.pinScale != old.pinScale
         ) applyMap()
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
@@ -568,6 +568,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         }
         globe?.setMap(base, overlays)
         globe?.setDayNight(l.dayNight)
+        globe?.pinScale = l.pinScale
         applyCredits(base, overlays)
     }
 

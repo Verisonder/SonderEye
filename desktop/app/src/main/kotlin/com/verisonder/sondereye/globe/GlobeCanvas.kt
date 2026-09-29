@@ -140,7 +140,7 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
         drawIntoCanvas { painter.draw(it.nativeCanvas, v, g.density) }
         drawLines(v, g.lines, lineCache)
         g.highlight?.let { hl -> drawIntoCanvas { painter.drawHighlight(it.nativeCanvas, v, g.density, hl) } }
-        drawMarkers(v, g.markers, g.selectedKey, g.density, scratch)
+        drawMarkers(v, g.markers, g.selectedKey, g.density, scratch, g.pinScale)
     }
 }
 
@@ -336,7 +336,7 @@ internal class LineCache {
 private val DARK = Color(0xE6030A10)
 
 /** Markers face the screen: dots, arrows for aircraft, ships and buses, diamonds for satellites. */
-internal fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float, scratch: Scratch) {
+internal fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float, scratch: Scratch, pinScale: Float = 1f) {
     var sel: Pair<Offset, Float>? = null
     // Plain dots (stops, fires, quakes: often thousands) are gathered by colour and size and
     // drawn a batch at a time; anything else first draws the dots gathered so far, to keep
@@ -358,9 +358,10 @@ internal fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String
         if (!proj.at(v, m.pos)) continue
         val c = Offset(proj.x, proj.y)
         if (c.x < -50 || c.y < -50 || c.x > size.width + 50 || c.y > size.height + 50) continue
-        val r = m.sizePx / 2
+        val px = m.sizePx * pinScale
+        val r = px / 2
         if (m.shape == Marker.SHAPE_DOT) {
-            val key = ((m.rgb.toLong() and 0xFFFFFF) shl 16) or ((m.sizePx * 8).toLong() and 0xFFFF)
+            val key = ((m.rgb.toLong() and 0xFFFFFF) shl 16) or ((px * 8).toLong() and 0xFFFF)
             dots.getOrPut(key) { ArrayList() }.add(c)
             if (m.key == selected) sel = c to r
             continue

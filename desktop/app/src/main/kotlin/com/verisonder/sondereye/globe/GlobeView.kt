@@ -47,6 +47,8 @@ class GlobeView(cacheDir: File, val density: Float, private val listener: Listen
     internal var highlight by mutableStateOf<RoadSet?>(null)
     internal var selectedKey by mutableStateOf<String?>(null)
     internal var dayNight by mutableStateOf(false)
+    /** Pins drawn at this size times their own (the menu's Pin size). */
+    var pinScale by mutableStateOf(0.7f)
     internal var base by mutableStateOf(TileSource.SATELLITE)
     internal var overlays by mutableStateOf<List<TileSource>>(emptyList())
     /** Draw nothing but space (the start-up screen is still up). */
