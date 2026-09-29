@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -146,9 +147,36 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
 /** Pixels the map moves per unit of touchpad scrolling. */
 private const val SLIDE_PX = 40f
 
-private class Scratch {
+internal class Scratch {
     val a = Path()
     val b = Path()
+    val dots = LinkedHashMap<Long, ArrayList<Offset>>()
+    val proj = Proj()
+}
+
+/** A point's screen position into [x], [y], without allocating; false when not seen. */
+internal class Proj {
+    var x = 0f
+    var y = 0f
+
+    fun at(v: View, p: V3): Boolean {
+        val e = v.eye
+        val r2 = p.x * p.x + p.y * p.y + p.z * p.z
+        if (r2 < (EARTH_R + 50_000.0) * (EARTH_R + 50_000.0)) {
+            if (p.x * e.x + p.y * e.y + p.z * e.z <= r2) return false // beyond the horizon
+        } else if (!visible(v, p)) return false
+        val dx = p.x - e.x
+        val dy = p.y - e.y
+        val dz = p.z - e.z
+        val f = v.forward
+        val d = dx * f.x + dy * f.y + dz * f.z
+        if (d <= 0) return false
+        val r = v.right
+        val u = v.up
+        x = (v.width / 2.0 + (dx * r.x + dy * r.y + dz * r.z) / d * v.focalPx).toFloat()
+        y = (v.height / 2.0 - (dx * u.x + dy * u.y + dz * u.z) / d * v.focalPx).toFloat()
+        return true
+    }
 }
 
 private class MouseState {
@@ -202,12 +230,18 @@ internal fun visible(v: View, p: V3): Boolean {
  * far side and off-screen segments are skipped, and the paths are kept while the camera and
  * the lines stay the same (the globe also redraws for other reasons, every second).
  */
-private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>, cache: LineCache) {
+internal fun DrawScope.drawLines(v: View, lines: List<GlobeLine>, cache: LineCache) {
     if (cache.cam != v.cam || cache.w != v.width || cache.h != v.height || cache.lines !== lines) {
         cache.rebuild(v, lines)
     }
-    for ((color, path) in cache.paths) drawPath(path, color, style = Stroke(width = 2f, cap = StrokeCap.Round))
+    for ((color, path) in cache.paths) drawPath(path, color, style = LINE_STROKE)
 }
+
+/**
+ * A hairline, as on the phone (its GL lines are one pixel): drawn by a fast path in Skia,
+ * where a 2-pixel stroke over tens of thousands of segments had to be outlined first.
+ */
+private val LINE_STROKE = Stroke(width = 0f)
 
 internal class LineCache {
     var cam: com.verisonder.sondereye.core.CameraState? = null
@@ -255,6 +289,12 @@ internal class LineCache {
             val path = pathFor(key)
             val pts = l.points
             if (l.pairs) {
+                // Segments that carry on from the last one join it (one line, not thousands of
+                // bits), and points within a pixel and a half of the last one drawn are left out.
+                var lastX = Float.NaN
+                var lastY = Float.NaN
+                var drawnX = 0f
+                var drawnY = 0f
                 var i = 0
                 while (i + 1 < pts.size) {
                     val a = pts[i]
@@ -265,8 +305,16 @@ internal class LineCache {
                     val ay = sy
                     if (!project(v, b.x, b.y, b.z)) continue
                     if (off(ax, ay) && off(sx, sy)) continue
-                    path.moveTo(ax, ay)
+                    if (ax != lastX || ay != lastY) {
+                        path.moveTo(ax, ay)
+                        drawnX = ax; drawnY = ay
+                    }
+                    lastX = sx; lastY = sy
+                    val dx = sx - drawnX
+                    val dy = sy - drawnY
+                    if (dx * dx + dy * dy < 2.25f) continue
                     path.lineTo(sx, sy)
+                    drawnX = sx; drawnY = sy
                 }
             } else {
                 var open = false
@@ -288,14 +336,36 @@ internal class LineCache {
 private val DARK = Color(0xE6030A10)
 
 /** Markers face the screen: dots, arrows for aircraft, ships and buses, diamonds for satellites. */
-private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float, scratch: Scratch) {
+internal fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float, scratch: Scratch) {
     var sel: Pair<Offset, Float>? = null
+    // Plain dots (stops, fires, quakes: often thousands) are gathered by colour and size and
+    // drawn a batch at a time; anything else first draws the dots gathered so far, to keep
+    // the layers' order.
+    val dots = scratch.dots
+    dots.clear()
+    fun flush() {
+        for ((key, pts) in dots) {
+            if (pts.isEmpty()) continue
+            val d = (key and 0xFFFF).toFloat() / 8f
+            val color = Color(((key ushr 16).toInt()) or 0xFF000000.toInt())
+            drawPoints(pts, PointMode.Points, DARK, strokeWidth = d, cap = StrokeCap.Round)
+            drawPoints(pts, PointMode.Points, color, strokeWidth = (d - 2.4f * density).coerceAtLeast(2f), cap = StrokeCap.Round)
+            pts.clear()
+        }
+    }
+    val proj = scratch.proj
     for (m in list) {
-        if (!visible(v, m.pos)) continue
-        val s = v.project(m.pos) ?: continue
-        val c = Offset(s[0].toFloat(), s[1].toFloat())
+        if (!proj.at(v, m.pos)) continue
+        val c = Offset(proj.x, proj.y)
         if (c.x < -50 || c.y < -50 || c.x > size.width + 50 || c.y > size.height + 50) continue
         val r = m.sizePx / 2
+        if (m.shape == Marker.SHAPE_DOT) {
+            val key = ((m.rgb.toLong() and 0xFFFFFF) shl 16) or ((m.sizePx * 8).toLong() and 0xFFFF)
+            dots.getOrPut(key) { ArrayList() }.add(c)
+            if (m.key == selected) sel = c to r
+            continue
+        }
+        flush()
         val color = Color(m.rgb or 0xFF000000.toInt())
         when (m.shape) {
             Marker.SHAPE_PLANE -> {
@@ -338,6 +408,7 @@ private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?
         }
         if (m.key == selected) sel = c to r
     }
+    flush()
     sel?.let { (c, r) ->
         drawCircle(Color.White, r + 7f * density, c, style = Stroke(width = 2f * density))
     }
