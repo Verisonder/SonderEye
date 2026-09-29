@@ -206,6 +206,8 @@ class MainActivity : ComponentActivity() {
     private var globe: GlobeView? = null
     private val jobs = HashMap<String, Job>()
     private var flyToMeOnFix = false
+    /** Height to fly to once the position arrives: city view, or street view (long-press). */
+    private var flyToMeAlt = ME_ALT
     /** Radar frame path on screen (null: the latest). */
     private var radarFrame: String? = null
     /** Android stops showing the permission dialog after repeated denials. */
@@ -250,7 +252,7 @@ class MainActivity : ComponentActivity() {
                 globe?.setLayer("me", listOf(meMarker(loc)))
                 if (flyToMeOnFix) {
                     flyToMeOnFix = false
-                    globe?.flyTo(loc.latitude, loc.longitude, ME_ALT)
+                    globe?.flyTo(loc.latitude, loc.longitude, flyToMeAlt)
                 }
                 if (state.passes == null) recomputePasses()
             },
@@ -296,7 +298,8 @@ class MainActivity : ComponentActivity() {
                             globe?.select(null, fly = false)
                             globe?.home()
                         },
-                        myLocation = ::myLocation,
+                        myLocation = { myLocation() },
+                        myLocationClose = { myLocation(ME_CLOSE_ALT) },
                         fixLocation = ::fixLocation,
                         sky = { startActivity(Intent(this, SkyActivity::class.java)) },
                         search = ::search,
@@ -1203,14 +1206,15 @@ class MainActivity : ComponentActivity() {
         askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
 
     /** The location button: switches location on if needed, then flies there. */
-    private fun myLocation() {
+    private fun myLocation(alt: Double = ME_ALT) {
+        flyToMeAlt = alt
         if (!state.layers.location) {
             state.layers = state.layers.copy(location = true)
             store.save(state.layers)
         }
         val me = state.me
         if (me != null) {
-            globe?.flyTo(me.latitude, me.longitude, ME_ALT)
+            globe?.flyTo(me.latitude, me.longitude, alt)
             return
         }
         flyToMeOnFix = true
@@ -1273,6 +1277,8 @@ class MainActivity : ComponentActivity() {
         private const val CAMERAS_MAX_ALT = 60_000.0
         /** Camera height when flying to you: a city and its surroundings. */
         private const val ME_ALT = 25_000.0
+        /** Long-press on the pin: your street. */
+        private const val ME_CLOSE_ALT = 600.0
         const val ISS = 25544
         const val CSS = 48274 // Tiangong
     }

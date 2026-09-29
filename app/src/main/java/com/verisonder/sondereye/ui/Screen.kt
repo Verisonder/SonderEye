@@ -147,6 +147,8 @@ class Actions(
     val select: (Sel?) -> Unit,
     val home: () -> Unit,
     val myLocation: () -> Unit,
+    /** Long-press on the pin: fly to street level. */
+    val myLocationClose: () -> Unit,
     val fixLocation: () -> Unit,
     val sky: () -> Unit,
     val search: (String) -> Unit,
@@ -322,7 +324,12 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Tool(Icons.Default.Refresh, "Refresh", false, onClick = actions.refresh)
             }
             ToolDivider()
-            Tool(Icons.Default.LocationOn, "Where I am: fly to my position", false, tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+            Tool(
+                Icons.Default.LocationOn, "Where I am", false,
+                tint = if (state.me != null) Palette.me else Palette.text,
+                onLongPress = actions.myLocationClose, // street level
+                onClick = actions.myLocation,
+            )
             ToolDivider()
             Tool(SkyIcon, "Sky view: point the phone at the sky", false, onClick = actions.sky)
             ToolDivider()
@@ -704,9 +711,16 @@ private val EarthIcon: ImageVector by lazy {
 
 /** A key on the tool strip. Long-press says what it does. */
 @Composable
-private fun Tool(icon: ImageVector, label: String, active: Boolean, tint: Color = Palette.text, onClick: () -> Unit) {
+private fun Tool(
+    icon: ImageVector, label: String, active: Boolean, tint: Color = Palette.text,
+    /** A second action on long-press; without one, long-press says what the key does. */
+    onLongPress: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     val context = LocalContext.current
     val tap by androidx.compose.runtime.rememberUpdatedState(onClick) // the gesture outlives recompositions
+    val hold by androidx.compose.runtime.rememberUpdatedState(onLongPress)
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     Box(
         Modifier
             .size(48.dp)
@@ -714,7 +728,15 @@ private fun Tool(icon: ImageVector, label: String, active: Boolean, tint: Color 
             .pointerInput(label) {
                 detectTapGestures(
                     onTap = { tap() },
-                    onLongPress = { android.widget.Toast.makeText(context, label, android.widget.Toast.LENGTH_SHORT).show() },
+                    onLongPress = {
+                        val h = hold
+                        if (h != null) {
+                            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            h()
+                        } else {
+                            android.widget.Toast.makeText(context, label, android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    },
                 )
             },
         contentAlignment = Alignment.Center,
