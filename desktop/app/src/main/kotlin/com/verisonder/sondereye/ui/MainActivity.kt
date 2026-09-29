@@ -1509,8 +1509,11 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         val fresh = HashMap(shipMap)
         state.ships = fresh
         globe?.setLayer("ships", fresh.values.sortedByDescending { it.atMs }.take(4000).map { sh ->
-            val p = if (sh.sogKt != null && sh.sogKt > 0.5 && sh.cog != null)
-                Motion.ahead(sh.lat, sh.lon, sh.cog, sh.sogKt, ((now - sh.atMs) / 1000.0).coerceAtMost(600.0))
+            // Locals: the ship type lives in the shared module, where smart casts do not reach.
+            val sog = sh.sogKt
+            val cog = sh.cog
+            val p = if (sog != null && sog > 0.5 && cog != null)
+                Motion.ahead(sh.lat, sh.lon, cog, sog, ((now - sh.atMs) / 1000.0).coerceAtMost(600.0))
             else doubleArrayOf(sh.lat, sh.lon)
             Marker("v:" + sh.mmsi, p[0], p[1], 15f * density, Palette.ship.toArgb(),
                 shape = if (sh.bearing != null) Marker.SHAPE_PLANE else Marker.SHAPE_DOT, bearing = sh.bearing ?: Double.NaN)
