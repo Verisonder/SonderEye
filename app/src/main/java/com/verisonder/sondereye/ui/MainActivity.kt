@@ -24,7 +24,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.verisonder.sondereye.core.Ais
+import com.verisonder.sondereye.core.Bus
+import com.verisonder.sondereye.core.BusLine
+import com.verisonder.sondereye.core.BusStop
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.RtFeed
 import com.verisonder.sondereye.core.Firms
 import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.BriefCache
@@ -93,6 +97,9 @@ sealed class Sel(val key: String) {
     class OfShip(val s: Ship) : Sel("v:" + s.mmsi)
     class OfWebcam(val w: Webcam) : Sel("w:" + w.id)
     class OfFire(val h: Hotspot) : Sel("h:%.4f,%.4f".format(java.util.Locale.ROOT, h.lat, h.lon))
+    class OfBusStop(val s: BusStop) : Sel("bs:" + s.id)
+    class OfBusLine(val l: BusLine) : Sel("bl:" + l.id)
+    class OfBus(val b: Bus) : Sel("bv:" + b.key)
     /** A spot picked by a long press, for its weather. */
     class OfPlace(val lat: Double, val lon: Double) : Sel("p:%.4f,%.4f".format(java.util.Locale.ROOT, lat, lon))
 }
@@ -198,6 +205,16 @@ class EyeState {
     var firesNote by mutableStateOf<String?>(null)
     /** Showing the strongest fires worldwide (from high up), not all of them around the view. */
     var firesWorld by mutableStateOf(false)
+    /** Bus lines (one per direction) and their stops, OpenStreetMap. */
+    val busLines = Feed<BusLine>()
+    var busStops by mutableStateOf<List<BusStop>>(emptyList())
+    var busLinesNote by mutableStateOf<String?>(null)
+    /** Live buses, and what the legend says about where they come from. */
+    val buses = Feed<Bus>()
+    var busesNote by mutableStateOf<String?>(null)
+    var busFeeds by mutableStateOf<List<RtFeed>>(emptyList())
+    /** Feeds found here that want their own key (their operator's), so show nothing. */
+    var busFeedsUnreadable by mutableStateOf<List<String>>(emptyList())
     /** Satellites added by a search, drawn even when their group is not shown. */
     var extraSats by mutableStateOf<List<Sgp4>>(emptyList())
     /** Screen centre and camera, for the position readout: lat, lon, alt, heading. */
@@ -283,7 +300,7 @@ class MainActivity : ComponentActivity() {
                 override fun onError(message: String) { state.globeError = message }
             })
             // Fixes the draw order: later layers on top.
-            for (name in listOf("fires", "quakes", "events", "cameras", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
+            for (name in listOf("fires", "quakes", "events", "cameras", "busStops", "buses", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
             globe?.northLocked = state.layers.northLock
         } else {
@@ -330,7 +347,9 @@ class MainActivity : ComponentActivity() {
                         goTo = { sel ->
                             state.listLayer = null
                             select(sel)
-                            globe?.select(sel.key, fly = true)
+                            globe?.select(sel.key, fly = busPlace(sel) == null)
+                            // Buses and their lines are street-scale: stay close instead of flying out.
+                            busPlace(sel)?.let { p -> globe?.flyTo(p[0], p[1], globe!!.center()[2].coerceIn(1_500.0, BUS_FLY_ALT)) }
                         },
                         brief = { open ->
                             state.brief.open = open
@@ -413,6 +432,11 @@ class MainActivity : ComponentActivity() {
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
+                        if (l.busLines) {
+                            if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busArea.stale(globe?.center())) loadBusLines()
+                            showBusStops()
+                        }
+                        if (l.buses && !state.buses.loading && now - state.buses.attemptAt >= maxOf(BUSES_MS, busesBackoffS * 1000L)) loadBuses()
                         if (l.ships) tickShips(now) else if (shipsOpen) closeShips()
                         if (l.webcams && !state.webcams.loading && now - state.webcams.attemptAt >= 15_000 && webcamArea.stale(globe?.center())) loadWebcams()
                         if (l.fires && !state.fires.loading &&
@@ -444,9 +468,11 @@ class MainActivity : ComponentActivity() {
         ) applyMap()
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
+        if (new.busLines != old.busLines) loadBusLines(force = true)
+        if (new.buses != old.buses) loadBuses(force = true)
         Palette.dark = !new.lightPanels
         if (new.northLock != old.northLock) globe?.northLocked = new.northLock
-        if (new.credits != old.credits || new.cameras != old.cameras) applyMap()
+        if (new.credits != old.credits || new.cameras != old.cameras || new.busLines != old.busLines) applyMap()
         if (new.ships != old.ships && !new.ships) closeShips()
         if (new.webcams != old.webcams) loadWebcams(force = true)
         if (new.fires != old.fires) loadFires(force = true)
@@ -515,7 +541,7 @@ class MainActivity : ComponentActivity() {
         val shown = listOf(base) + overlays
         val all = (shown + TileSource.BLUE_MARBLE).map { it.credit }.toMutableList()
         val required = shown.filter { it.id.startsWith("esri") || it.id.startsWith("rain") }.map { it.credit }.toMutableList()
-        if (state.layers.cameras || state.search.searched) {
+        if (state.layers.cameras || state.layers.busLines || state.search.searched) {
             all.add("© OpenStreetMap contributors"); required.add("© OpenStreetMap contributors")
         }
         state.allCredits = all.distinct()
@@ -941,6 +967,174 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ---- Bus lines (OpenStreetMap) -------------------------------------------------------
+
+    private val busArea = Area()
+
+    private fun loadBusLines(force: Boolean = false) {
+        if (!state.layers.busLines) {
+            state.busLinesNote = null
+            busArea.centre = null
+            state.busStops = emptyList()
+            stopsShown = false
+            globe?.setLayer("busStops", emptyList())
+            clear(state.busLines, "busLines", "bl:")
+            if (state.selected?.key?.startsWith("bs:") == true) select(null)
+            drawBusLines()
+            return
+        }
+        val c = globe?.center() ?: return
+        state.busLines.attemptAt = System.currentTimeMillis()
+        if (force) busArea.centre = null
+        if (c[2] > BUS_LINES_MAX_ALT) {
+            state.busLinesNote = "zoom in below ${(BUS_LINES_MAX_ALT / 1000).toInt()} km to load them"
+            busArea.centre = null
+            return
+        }
+        state.busLinesNote = null
+        val r = (c[2] * 1.6).coerceIn(3_000.0, 25_000.0) // metres around the centre; a city at most
+        val b = box(c, r, 1.0)
+        state.busLines.loading = true
+        run("busLines") {
+            val out = withContext(Dispatchers.IO) { Feeds.busLines(b[0], b[1], b[2], b[3]) }
+            state.busLines.loading = false
+            when (out) {
+                is Net.Outcome.Ok -> {
+                    busArea.centre = doubleArrayOf(c[0], c[1], r)
+                    state.busLines.items = out.value.lines.sortedBy { it.short.padStart(6, '0') } // L2 before L10
+                    state.busStops = out.value.stops
+                    state.busLines.updatedAt = System.currentTimeMillis()
+                    state.busLines.error = null
+                    stopsShown = false
+                    showBusStops()
+                    drawBusLines()
+                    refreshSelection()
+                }
+                is Net.Outcome.Failed -> state.busLines.error = out.message
+            }
+        }
+    }
+
+    /** The routes on the globe; the selected one bright, the rest quieter while one is selected. */
+    private fun drawBusLines() {
+        val sel = (state.selected as? Sel.OfBusLine)?.l?.id
+        if (!state.layers.busLines) {
+            globe?.setLines("busLines", emptyList())
+            return
+        }
+        val lines = state.busLines.items.map { l ->
+            val pts = ArrayList<V3>()
+            for (seg in l.paths) for (i in 0 until seg.size - 1) {
+                pts.add(Geo.ecef(seg[i][0], seg[i][1], BUS_LINE_LIFT_M))
+                pts.add(Geo.ecef(seg[i + 1][0], seg[i + 1][1], BUS_LINE_LIFT_M))
+            }
+            val alpha = when {
+                sel == null -> 0.8f
+                l.id == sel -> 1f
+                else -> 0.25f
+            }
+            GlobeLine(pts, busColour(l), alpha, pairs = true)
+        }
+        // The selected line last, so it is drawn over the others.
+        globe?.setLines("busLines", lines.sortedBy { if (it.alpha == 1f) 1 else 0 })
+    }
+
+    private fun busColour(l: BusLine) = l.colour?.let { 0xFF000000.toInt() or it } ?: Palette.bus.toArgb()
+
+    private var stopsShown = false
+
+    /** Stops only close in: a city's worth of dots from higher up is noise. */
+    private fun showBusStops() {
+        val alt = globe?.center()?.get(2) ?: return
+        val want = state.layers.busLines && alt <= BUS_STOPS_MAX_ALT
+        if (want == stopsShown) return
+        stopsShown = want
+        globe?.setLayer("busStops", if (!want) emptyList() else state.busStops.map { s ->
+            Marker("bs:" + s.id, s.lat, s.lon, 9f * density, Palette.busStop.toArgb())
+        })
+    }
+
+    /** Where to fly for a bus thing, or null when it is not one. */
+    private fun busPlace(sel: Sel): DoubleArray? = when (sel) {
+        is Sel.OfBusStop -> doubleArrayOf(sel.s.lat, sel.s.lon)
+        is Sel.OfBus -> doubleArrayOf(sel.b.lat, sel.b.lon)
+        is Sel.OfBusLine -> {
+            val all = sel.l.paths.flatten()
+            if (all.isEmpty()) null else all[all.size / 2]
+        }
+        else -> null
+    }
+
+    // ---- Live buses (GTFS Realtime through Transitland) ----------------------------------
+
+    private var busFeedsAt: DoubleArray? = null
+    private val busWays = HashMap<String, Feeds.RtWay>()
+    private var busesBackoffS = 0
+
+    private fun loadBuses(force: Boolean = false) {
+        if (!state.layers.buses) {
+            state.busesNote = null
+            state.busFeeds = emptyList(); state.busFeedsUnreadable = emptyList()
+            busFeedsAt = null
+            return clear(state.buses, "buses", "bv:")
+        }
+        val key = state.keys.transitland
+        if (key.isEmpty()) { state.busesNote = "add your Transitland key in the menu"; return }
+        val c = globe?.center() ?: return
+        state.buses.attemptAt = System.currentTimeMillis()
+        if (c[2] > BUSES_MAX_ALT) {
+            state.busesNote = "zoom in below ${(BUSES_MAX_ALT / 1000).toInt()} km to load them"
+            return
+        }
+        if (force) { busFeedsAt = null; busWays.clear() }
+        val last = busFeedsAt
+        val rediscover = last == null ||
+            Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000 > BUS_FEEDS_MOVE_M
+        state.buses.loading = true
+        run("buses") {
+            if (rediscover) {
+                when (val f = withContext(Dispatchers.IO) { Feeds.busFeeds(key, c[0], c[1], BUS_FEEDS_RADIUS_M) }) {
+                    is Net.Outcome.Ok -> {
+                        state.busFeeds = f.value
+                        busFeedsAt = doubleArrayOf(c[0], c[1])
+                    }
+                    is Net.Outcome.Failed -> {
+                        state.buses.loading = false
+                        state.buses.error = f.message
+                        busesBackoffS = f.retryAfterS ?: if (f.code == 429) 300 else 0
+                        return@run
+                    }
+                }
+            }
+            val feeds = state.busFeeds
+            if (feeds.isEmpty()) {
+                state.buses.loading = false
+                state.buses.error = null
+                state.busesNote = "no operator here publishes live positions"
+                state.buses.items = emptyList()
+                globe?.setLayer("buses", emptyList())
+                return@run
+            }
+            val out = withContext(Dispatchers.IO) { Feeds.buses(key, feeds, busWays) }
+            busesBackoffS = (out as? Net.Outcome.Failed)?.let { it.retryAfterS ?: if (it.code == 429) 300 else 0 } ?: 0
+            if (out is Net.Outcome.Ok) {
+                state.busFeedsUnreadable = out.value.second
+                state.busesNote = if (out.value.first.isEmpty() && out.value.second.isNotEmpty())
+                    "${out.value.second.joinToString()} needs its own key: not shown" else null
+            }
+            val centre = Geo.ecef(c[0], c[1])
+            settle(state.buses, map(out) { v ->
+                // A big city runs thousands: the nearest are the ones on screen.
+                v.first.sortedBy { Geo.angle(Geo.ecef(it.lat, it.lon), centre) }.take(BUSES_MAX) to 0
+            }, "buses") { list ->
+                list.map { b ->
+                    Marker("bv:" + b.key, b.lat, b.lon, 17f * density, Palette.bus.toArgb(),
+                        shape = if (b.bearing != null) Marker.SHAPE_PLANE else Marker.SHAPE_DOT, bearing = b.bearing ?: Double.NaN)
+                }
+            }
+        }
+    }
+
     // ---- Layers that need a personal key --------------------------------------------------
 
     /** Remembers where a box-shaped layer last loaded, to know when the view has left it. */
@@ -1257,11 +1451,16 @@ class MainActivity : ComponentActivity() {
         key.startsWith("w:") -> state.webcams.items.firstOrNull { "w:" + it.id == key }?.let { Sel.OfWebcam(it) }
         key.startsWith("h:") -> state.fires.items.firstOrNull { Sel.OfFire(it).key == key }?.let { Sel.OfFire(it) }
         key.startsWith("e:") -> state.events.items.firstOrNull { "e:" + it.id == key }?.let { Sel.OfEvent(it) }
+        key.startsWith("bs:") -> state.busStops.firstOrNull { "bs:" + it.id == key }?.let { Sel.OfBusStop(it) }
+        key.startsWith("bl:") -> state.busLines.items.firstOrNull { "bl:" + it.id == key }?.let { Sel.OfBusLine(it) }
+        key.startsWith("bv:") -> state.buses.items.firstOrNull { "bv:" + it.key == key }?.let { Sel.OfBus(it) }
         else -> null
     }
 
     private fun select(sel: Sel?) {
+        val lineChanged = (state.selected as? Sel.OfBusLine)?.l?.id != (sel as? Sel.OfBusLine)?.l?.id
         state.selected = sel
+        if (lineChanged) drawBusLines()
         state.passes = null
         state.weather = null
         if (sel !is Sel.OfPlace) globe?.setLayer("pin", emptyList())
@@ -1370,6 +1569,16 @@ class MainActivity : ComponentActivity() {
         private const val SHIPS_MAX_ALT = 2_000_000.0
         private const val WEBCAMS_MAX_ALT = 1_000_000.0
         private const val FIRES_MAX_ALT = 6_000_000.0
+        /** Bus routes come from Overpass in city-sized boxes; stops only at street scale. */
+        private const val BUS_LINES_MAX_ALT = 40_000.0
+        private const val BUS_STOPS_MAX_ALT = 12_000.0
+        private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it
+        private const val BUS_FLY_ALT = 8_000.0
+        private const val BUSES_MAX_ALT = 300_000.0
+        private const val BUSES_MS = 30_000L
+        private const val BUSES_MAX = 3_000
+        private const val BUS_FEEDS_RADIUS_M = 10_000
+        private const val BUS_FEEDS_MOVE_M = 30_000.0
         /** Above the limits: the whole Earth, cut to what reads from space. */
         private const val WORLD_FIRES = 10_000
         private const val WORLD_FIRES_MS = 30 * 60_000L

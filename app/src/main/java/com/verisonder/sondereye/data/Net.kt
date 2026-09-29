@@ -21,26 +21,32 @@ object Net {
 
     /** A form POST (Overpass wants its query in the body). */
     fun <T> post(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
-        request(url, what, source, body, emptyMap(), parse)
+        request(url, what, source, body, emptyMap(), text(parse))
 
     /** A JSON POST (Gemini). */
     fun <T> postJson(url: String, json: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
-        request(url, what, source, json, mapOf("Content-Type" to "application/json"), parse)
+        request(url, what, source, json, mapOf("Content-Type" to "application/json"), text(parse))
 
     /** [what] names the source in messages ("Earthquakes", "Flights"…). */
     fun <T> get(url: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, null, emptyMap(), text(parse))
+
+    /** GET of a binary body (a protocol buffer). */
+    fun <T> getBytes(url: String, what: String, source: String, parse: (ByteArray) -> T): Outcome<T> =
         request(url, what, source, null, emptyMap(), parse)
 
     /** GET with extra request headers (an API key). */
     fun <T> getWith(url: String, headers: Map<String, String>, what: String, source: String, parse: (String) -> T): Outcome<T> =
-        request(url, what, source, null, headers, parse)
+        request(url, what, source, null, headers, text(parse))
+
+    private fun <T> text(parse: (String) -> T): (ByteArray) -> T = { parse(String(it, Charsets.UTF_8)) }
 
     /** Whether this request sent a personal key (so a refusal is about the key). */
     private fun hasKey(url: String, headers: Map<String, String>) =
         headers.keys.any { it.contains("key", true) } || Regex("[?&](key|api_?key|apikey)=").containsMatchIn(url) || "/api/area/" in url
 
     private fun <T> request(
-        url: String, what: String, source: String, body: String?, headers: Map<String, String>, parse: (String) -> T,
+        url: String, what: String, source: String, body: String?, headers: Map<String, String>, parse: (ByteArray) -> T,
     ): Outcome<T> {
         val conn = try {
             URL(url).openConnection() as HttpURLConnection
@@ -76,9 +82,9 @@ object Net {
                     ?.let { Regex("\"message\"\\s*:\\s*\"([^\"]{1,160})").find(it)?.groupValues?.get(1) }
                 return Outcome.Failed("$what: $source answered HTTP $code" + (detail?.let { " ($it)" } ?: ""))
             }
-            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val bytes = conn.inputStream.use { it.readBytes() }
             try {
-                Outcome.Ok(parse(text))
+                Outcome.Ok(parse(bytes))
             } catch (e: Exception) {
                 Outcome.Failed("$what: the $source data could not be read (${e.message})")
             }

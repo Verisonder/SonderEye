@@ -118,6 +118,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.verisonder.sondereye.core.Bus
+import com.verisonder.sondereye.core.BusLine
+import com.verisonder.sondereye.core.BusStop
 import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.Ship
@@ -489,6 +492,26 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
                 onOpen = { actions.openList("cameras") },
             )
         }
+        if (l.busLines) {
+            any = true
+            val b = state.busLines
+            LayerLine(
+                Palette.bus,
+                state.busLinesNote?.let { "Bus lines" } ?: if (b.loading && b.updatedAt == null) "Loading bus lines…" else count(b.items.size, "bus line"),
+                state.busLinesNote ?: "${state.busStops.size} stops, OpenStreetMap",
+                onOpen = { actions.openList("busLines") },
+            )
+        }
+        if (l.buses) {
+            any = true
+            val feeds = state.busFeeds.map { it.name }.filter { it !in state.busFeedsUnreadable }
+            LayerLine(
+                Palette.bus,
+                state.busesNote?.let { "Live buses" } ?: if (state.buses.loading && state.buses.updatedAt == null) "Loading buses…" else count(state.buses.items.size, "live bus", "live buses"),
+                state.busesNote ?: ("live, " + feeds.joinToString().ifEmpty { "Transitland" }),
+                onOpen = { actions.openList("buses") },
+            )
+        }
         if (l.ships) {
             any = true
             LayerLine(Palette.ship, if (state.shipsNote != null) "Ships" else count(state.ships.size, "ship"), state.shipsNote ?: "live AIS, AISStream") { actions.openList("ships") }
@@ -520,7 +543,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         }
 
         // Every failure, in red, with what it means.
-        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error)) {
+        for (err in listOfNotNull(state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error, state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error)) {
             ErrorLine("$err. Tap to retry.", actions.refresh)
         }
         state.alertProblem?.let { ErrorLine(it, null) }
@@ -541,7 +564,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     val problems = listOfNotNull(
         state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
-        state.cameras.error, state.webcams.error, state.fires.error, state.meProblem, state.alertProblem,
+        state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.meProblem, state.alertProblem,
         state.shipsProblem, state.globeError,
     ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
     val shape = RoundedCornerShape(14.dp)
@@ -567,6 +590,8 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
                 if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
                 if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
+                if (l.busLines) Key(Sym.DOT, Palette.bus, if (state.busLinesNote != null) "–" else n(state.busLines), "bus lines") { actions.openList("busLines") }
+                if (l.buses) Key(Sym.PLANE, Palette.bus, if (state.busesNote != null) "–" else n(state.buses), "buses") { actions.openList("buses") }
                 if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
                 if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
             }
@@ -963,6 +988,9 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfShip -> ShipBody(state.ships[sel.s.mmsi] ?: sel.s, now, context, close)
                 is Sel.OfWebcam -> WebcamBody(sel.w, context, close)
                 is Sel.OfFire -> FireBody(sel.h, context, close)
+                is Sel.OfBusStop -> BusStopBody(sel.s, state, actions, close)
+                is Sel.OfBusLine -> BusLineBody(sel.l, state, context, close)
+                is Sel.OfBus -> BusBody(sel.b, state, close)
                 is Sel.OfSat -> SatBody(sel.s, state, actions, close)
                 is Sel.OfEvent -> EventBody(sel.e, now, context, close)
                 is Sel.OfPlace -> PlaceBody(sel, state, close)
@@ -1065,6 +1093,52 @@ private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Un
     LinkRow("NASA FIRMS, VIIRS NOAA-20", "Open FIRMS map") {
         openUrl(context, "https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@%.4f,%.4f,11.0z".format(java.util.Locale.ROOT, h.lon, h.lat))
     }
+}
+
+@Composable
+private fun ColumnScope.BusStopBody(s: BusStop, state: EyeState, actions: Actions, onClose: () -> Unit) {
+    val lines = state.busLines.items.filter { it.id in s.lineIds }
+    Header(null, Palette.busStop, s.name ?: "Bus stop", if (lines.size == 1) "1 line stops here" else "${lines.size} lines stop here", onClose, Sym.DOT)
+    // Tap a line to see its whole route.
+    for (l in lines.distinctBy { it.id }) {
+        Row(
+            Modifier.fillMaxWidth().clickable { actions.goTo(Sel.OfBusLine(l)) }.padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(10.dp).background(l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(l.short, color = Palette.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(8.dp))
+            Text(l.route, color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text("›", color = Palette.signal, fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
+        }
+    }
+    Line("Mapped by OpenStreetMap volunteers")
+}
+
+@Composable
+private fun ColumnScope.BusLineBody(l: BusLine, state: EyeState, context: Context, onClose: () -> Unit) {
+    val colour = l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus
+    Header(null, colour, "Line ${l.short}", l.route, onClose, Sym.DOT)
+    val stops = l.stopIds.mapNotNull { id -> state.busStops.firstOrNull { it.id == id } }
+    Line(listOfNotNull(l.network ?: l.operator, if (stops.isEmpty()) null else "${stops.size} stops in view").joinToString(", ").ifEmpty { "Bus line" })
+    val named = stops.mapNotNull { it.name }
+    if (named.size >= 2) Line("${named.first()} … ${named.last()}")
+    LinkRow("Mapped by OpenStreetMap volunteers", "Open in OSM") { openUrl(context, "https://www.openstreetmap.org/relation/${l.id}") }
+}
+
+@Composable
+private fun ColumnScope.BusBody(b: Bus, state: EyeState, onClose: () -> Unit) {
+    val title = b.routeId?.let { "Bus, route $it" } ?: "Bus"
+    Header(null, Palette.bus, title, listOfNotNull(b.label?.let { "vehicle $it" }, b.feed).joinToString(", "), onClose, Sym.PLANE)
+    Line(
+        listOfNotNull(
+            b.speedMs?.let { "${(it * 3.6).roundToInt()} km/h" },
+            b.bearing?.let { "heading ${Sky.compass(it)}" },
+            b.atMs?.let { "position ${Fmt.ago(it, state.clock).lowercase()}" },
+        ).ifEmpty { listOf("No speed reported") }.joinToString(", "),
+    )
+    Line("Live from the operator's GTFS Realtime feed, through Transitland")
 }
 
 @Composable
@@ -1258,6 +1332,15 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
             ListRow(Sel.OfCamera(c), Sym.DOT, if (c.alpr) Palette.alpr else Palette.camera, if (c.alpr) "Licence-plate reader" else "Surveillance camera",
                 listOfNotNull(c.operator, c.direction?.let { "facing ${Sky.compass(it)}" }).joinToString(", ").ifEmpty { "No details mapped" },
                 if (c.alpr) 1.0 else 0.0, 0.0)
+        })
+        "busLines" -> Triple("Bus lines", "Number" to "Stops", state.busLines.items.mapIndexed { i, l ->
+            ListRow(Sel.OfBusLine(l), Sym.DOT, l.colour?.let { Color(0xFF000000 or it.toLong()) } ?: Palette.bus, "Line ${l.short}",
+                l.route.ifEmpty { l.network ?: "" }, -i.toDouble(), l.stopIds.size.toDouble())
+        })
+        "buses" -> Triple("Live buses", "Route" to "Latest report", state.buses.items.sortedBy { it.routeId?.padStart(6, '0') ?: "~" }.mapIndexed { i, b ->
+            ListRow(Sel.OfBus(b), Sym.PLANE, Palette.bus, b.routeId?.let { "Route $it" } ?: "Bus",
+                listOfNotNull(b.label?.let { "vehicle $it" }, b.atMs?.let { Fmt.ago(it, now).lowercase() }).joinToString(", "),
+                -i.toDouble(), (b.atMs ?: 0L).toDouble())
         })
         "webcams" -> Triple("Webcams", "Name" to "Place", state.webcams.items.map { w ->
             ListRow(Sel.OfWebcam(w), Sym.DIAMOND, Palette.webcam, w.title, w.place ?: "", -w.title.first().code.toDouble(), -(w.place?.firstOrNull()?.code ?: 0).toDouble())
@@ -1603,6 +1686,12 @@ private fun LayersPanel(
             Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
 
             Divider()
+            Section("Bus lines", "Routes and stops from OpenStreetMap; load below 40 km", s.busLines) { change(s.copy(busLines = it)) }
+
+            Divider()
+            Section("Live buses", "Where the operator publishes positions, below 300 km. Needs a key.", s.buses) { change(s.copy(buses = it)) }
+
+            Divider()
             Section("Ships", "Live positions from AISStream, below 2,000 km. Needs a key.", s.ships) { change(s.copy(ships = it)) }
 
             Divider()
@@ -1623,6 +1712,7 @@ private fun LayersPanel(
             KeyField("AISStream", "Ships", keys.ais, "https://aisstream.io/apikeys") { saveKeys(keys.copy(ais = it)) }
             KeyField("Windy Webcams", "Webcams", keys.windy, "https://api.windy.com/keys") { saveKeys(keys.copy(windy = it)) }
             KeyField("NASA FIRMS", "Fire hotspots", keys.firms, "https://firms.modaps.eosdis.nasa.gov/api/map_key/") { saveKeys(keys.copy(firms = it)) }
+            KeyField("Transitland", "Live buses", keys.transitland, "https://app.interline.io/products/tlv2_api/orders/new") { saveKeys(keys.copy(transitland = it)) }
             KeyField("Google Gemini", "the written brief in Today", keys.gemini, "https://aistudio.google.com/apikey") { saveKeys(keys.copy(gemini = it)) }
 
             Divider()
@@ -1745,7 +1835,7 @@ private fun Legend(color: Color, text: String) {
 
 // ---- Formatting ------------------------------------------------------------------------------
 
-private fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
+private fun count(n: Int, noun: String, plural: String = noun + "s") = if (n == 1) "1 $noun" else "$n $plural"
 
 private fun clock(ms: Long): String = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(ms))
 

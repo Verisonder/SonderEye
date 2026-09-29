@@ -45,7 +45,8 @@ class Marker(
 }
 
 /** A line through world space (an orbit, a flight's trail), metres. */
-class GlobeLine(val points: List<V3>, val rgb: Int, val alpha: Float = 1f)
+/** A polyline; with [pairs], separate segments (each two points), all in one draw. */
+class GlobeLine(val points: List<V3>, val rgb: Int, val alpha: Float = 1f, val pairs: Boolean = false)
 
 data class GlobeStatus(
     /** Tiles on screen still showing a blurrier parent or nothing. */
@@ -563,6 +564,7 @@ class GlobeRenderer(
     // ---- Lines (orbits, trails) --------------------------------------------------------
 
     private var pathVbo = 0
+    private var lineScratch = FloatArray(0)
 
     private fun drawLines(view: com.verisonder.sondereye.core.View, uMvp: Int, uHasTex: Int, uColor: Int, uAlpha: Int, uCenter: Int) {
         val all = lines
@@ -582,19 +584,20 @@ class GlobeRenderer(
         for (line in all) {
             val pts = line.points
             if (pts.size < 2) continue
-            val data = FloatArray(pts.size * 5)
+            if (lineScratch.size < pts.size * 5) lineScratch = FloatArray(pts.size * 5 * 2) // reused: bus networks are big
+            val data = lineScratch
             var o = 0
             for (p in pts) {
                 data[o++] = (p.x - eye.x).toFloat(); data[o++] = (p.y - eye.y).toFloat(); data[o++] = (p.z - eye.z).toFloat()
                 data[o++] = 0f; data[o++] = 0f
             }
             GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, pathVbo)
-            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.size * 4, floats(data, data.size), GLES30.GL_STREAM_DRAW)
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, o * 4, floats(data, o), GLES30.GL_STREAM_DRAW)
             GLES30.glEnableVertexAttribArray(0); GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 20, 0)
             GLES30.glEnableVertexAttribArray(1); GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 20, 12)
             GLES30.glUniform3f(uColor, ((line.rgb shr 16) and 0xFF) / 255f, ((line.rgb shr 8) and 0xFF) / 255f, (line.rgb and 0xFF) / 255f)
             GLES30.glUniform1f(uAlpha, line.alpha)
-            GLES30.glDrawArrays(GLES30.GL_LINE_STRIP, 0, pts.size)
+            GLES30.glDrawArrays(if (line.pairs) GLES30.GL_LINES else GLES30.GL_LINE_STRIP, 0, pts.size)
         }
         GLES30.glUniform1f(uAlpha, 1f)
         GLES30.glDisable(GLES30.GL_BLEND)

@@ -10,6 +10,11 @@ import com.verisonder.sondereye.core.Story
 import com.verisonder.sondereye.core.ForecastApi
 import com.verisonder.sondereye.core.Webcam
 import com.verisonder.sondereye.core.Windy
+import com.verisonder.sondereye.core.Bus
+import com.verisonder.sondereye.core.BusLines
+import com.verisonder.sondereye.core.GtfsRt
+import com.verisonder.sondereye.core.RtFeed
+import com.verisonder.sondereye.core.Transitland
 import com.verisonder.sondereye.core.Lookup
 import com.verisonder.sondereye.core.MinMag
 import com.verisonder.sondereye.core.Nominatim
@@ -82,6 +87,68 @@ object Feeds {
             }
         }
         return Net.Outcome.Ok(all.distinctBy { it.id })
+    }
+
+    fun busLines(s: Double, w: Double, n: Double, e: Double) =
+        Net.post(Overpass.URL, BusLines.query(s, w, n, e), "Bus lines", "OpenStreetMap Overpass", BusLines::parse)
+
+    /** Realtime feeds of the operators serving the point. */
+    fun busFeeds(key: String, lat: Double, lon: Double, radiusM: Int) =
+        Net.get(Transitland.operatorsUrl(lat, lon, radiusM, key), "Live buses", "Transitland", Transitland::parseRtFeeds)
+
+    /** How a feed's vehicles are read: Transitland's copy, the source itself, or not at all (the source wants its own key). */
+    sealed class RtWay {
+        object Cached : RtWay()
+        class Direct(val url: String) : RtWay()
+        object NeedsOwnKey : RtWay()
+    }
+
+    /**
+     * Vehicles from every feed, and the names of feeds that cannot be read. Transitland shares
+     * its copy of a feed only where the licence allows; otherwise the feed is read at its
+     * source, when that needs no key of its own. [ways] remembers what worked, per feed.
+     */
+    fun buses(key: String, feeds: List<RtFeed>, ways: MutableMap<String, RtWay>): Net.Outcome<Pair<List<Bus>, List<String>>> {
+        val buses = ArrayList<Bus>()
+        val unreadable = ArrayList<String>()
+        var lastFail: Net.Outcome.Failed? = null
+        for (f in feeds) {
+            var way = ways[f.onestopId]
+            if (way == null || way is RtWay.Cached) {
+                when (val o = Net.get(Transitland.vehiclesUrl(f.onestopId, key), "Live buses", "Transitland") { Transitland.parseVehicles(it, f) }) {
+                    is Net.Outcome.Ok -> {
+                        ways[f.onestopId] = RtWay.Cached
+                        buses += o.value
+                        continue
+                    }
+                    is Net.Outcome.Failed -> {
+                        if (o.code == 429 || way != null) { // slow down, or it worked before: say so
+                            lastFail = o
+                            if (o.code == 429) break else continue
+                        }
+                    }
+                }
+                val src = Net.get(Transitland.feedUrl(f.onestopId, key), "Live buses", "Transitland", Transitland::parseSource)
+                if (src !is Net.Outcome.Ok) {
+                    lastFail = src as Net.Outcome.Failed
+                    continue // try again next time
+                }
+                val url = src.value.vehiclesUrl
+                way = if (url != null && !src.value.needsKey) RtWay.Direct(url) else RtWay.NeedsOwnKey
+                ways[f.onestopId] = way
+            }
+            when (way) {
+                is RtWay.Direct -> when (val o = Net.getBytes(way.url, "Live buses", f.name) { GtfsRt.parseVehicles(it, f) }) {
+                    is Net.Outcome.Ok -> buses += o.value
+                    is Net.Outcome.Failed -> lastFail = o
+                }
+                RtWay.NeedsOwnKey -> unreadable += f.name
+                else -> {}
+            }
+        }
+        val fail = lastFail
+        if (buses.isEmpty() && fail != null) return fail
+        return Net.Outcome.Ok(buses to unreadable)
     }
 
     fun fires(key: String, w: Double, s: Double, e: Double, n: Double) =

@@ -48,6 +48,10 @@ data class Layers(
     val ships: Boolean = false,
     val webcams: Boolean = false,
     val fires: Boolean = false,
+    /** Bus lines and stops mapped in OpenStreetMap. */
+    val busLines: Boolean = false,
+    /** Live bus positions, where the operator publishes them (through Transitland). */
+    val buses: Boolean = false,
     /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
     val credits: Boolean = true,
     /** White chart-paper panels instead of dark ones. */
@@ -59,7 +63,7 @@ data class Layers(
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
-data class Keys(val ais: String = "", val windy: String = "", val firms: String = "", val gemini: String = "")
+data class Keys(val ais: String = "", val windy: String = "", val firms: String = "", val gemini: String = "", val transitland: String = "")
 
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -88,6 +92,8 @@ class Settings(context: Context) {
             ships = prefs.getBoolean("ships.enabled", d.ships),
             webcams = prefs.getBoolean("webcams.enabled", d.webcams),
             fires = prefs.getBoolean("fires.enabled", d.fires),
+            busLines = prefs.getBoolean("busLines.enabled", d.busLines),
+            buses = prefs.getBoolean("buses.enabled", d.buses),
             credits = prefs.getBoolean("map.credits", d.credits),
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
@@ -118,6 +124,8 @@ class Settings(context: Context) {
             .putBoolean("ships.enabled", s.ships)
             .putBoolean("webcams.enabled", s.webcams)
             .putBoolean("fires.enabled", s.fires)
+            .putBoolean("busLines.enabled", s.busLines)
+            .putBoolean("buses.enabled", s.buses)
             .putBoolean("map.credits", s.credits)
             .putBoolean("ui.lightPanels", s.lightPanels)
             .putBoolean("ui.northLock", s.northLock)
@@ -161,10 +169,12 @@ class Settings(context: Context) {
         prefs.getString("key.windy", "") ?: "",
         prefs.getString("key.firms", "") ?: "",
         prefs.getString("key.gemini", "") ?: "",
+        prefs.getString("key.transitland", "") ?: "",
     )
 
     fun saveKeys(k: Keys) {
-        prefs.edit().putString("key.ais", k.ais.trim()).putString("key.windy", k.windy.trim()).putString("key.firms", k.firms.trim()).putString("key.gemini", k.gemini.trim()).apply()
+        prefs.edit().putString("key.ais", k.ais.trim()).putString("key.windy", k.windy.trim()).putString("key.firms", k.firms.trim()).putString("key.gemini", k.gemini.trim())
+            .putString("key.transitland", k.transitland.trim()).apply()
     }
 
     /** Last known position, for pass alerts computed while the app is closed. */

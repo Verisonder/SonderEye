@@ -54,6 +54,9 @@ object Palette {
     val ship = Color(0xFF4DD0E1)
     val webcam = Color(0xFFFFE066)
     val fire = Color(0xFFFF3D00)
+    /** Buses, and bus lines that have no colour of their own in OpenStreetMap. */
+    val bus = Color(0xFFFF9F43)
+    val busStop = Color(0xFFF2F5F8)
 
     /** NASA EONET categories. */
     fun event(category: String): Color = when (category) {
