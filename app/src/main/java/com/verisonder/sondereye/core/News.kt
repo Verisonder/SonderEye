@@ -173,7 +173,7 @@ object Gemini {
     fun url(model: String, key: String) =
         "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=" + java.net.URLEncoder.encode(key.trim(), "UTF-8")
 
-    fun request(stories: List<Story>, weather: String?, place: String?, p: BriefPrefs = BriefPrefs()): String {
+    fun request(stories: List<Story>, weather: String?, place: String?, p: BriefPrefs = BriefPrefs(), model: String = MODELS[0]): String {
         val list = stories.joinToString("\n") { "- ${it.title}: ${it.summary} (${it.source})" }
         val prompt = buildString {
             append("Write a brief of today's news for one reader")
@@ -188,16 +188,28 @@ object Gemini {
             if (weather != null) append("Weather today: $weather\n\n")
             append("Headlines:\n").append(list)
         }
-        return "{\"contents\":[{\"parts\":[{\"text\":" + Json.str(prompt) + "}]}],\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":400}}"
+        // 2.5 Flash thinks before it writes, and the thinking counts against the output limit:
+        // with a small limit it stopped mid-sentence. No thinking is needed to summarise.
+        val thinking = if (model.startsWith("gemini-2.5")) ",\"thinkingConfig\":{\"thinkingBudget\":0}" else ""
+        return "{\"contents\":[{\"parts\":[{\"text\":" + Json.str(prompt) + "}]}]," +
+            "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":2048$thinking}}"
     }
 
     fun parse(text: String): String {
         val root = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
         (root["error"] as? Map<*, *>)?.let { throw Json.ParseError((it["message"] as? String) ?: "Gemini error") }
-        val parts = (((root["candidates"] as? List<*>)?.firstOrNull() as? Map<*, *>)?.get("content") as? Map<*, *>)?.get("parts") as? List<*>
+        val cand = (root["candidates"] as? List<*>)?.firstOrNull() as? Map<*, *>
+        val parts = ((cand?.get("content") as? Map<*, *>)?.get("parts") as? List<*>)
             ?: throw Json.ParseError("No text in the answer")
-        return parts.mapNotNull { (it as? Map<*, *>)?.get("text") as? String }.joinToString("").trim()
+        val text = parts
+            .filter { (it as? Map<*, *>)?.get("thought") != true } // its reasoning, if shown, is not the brief
+            .mapNotNull { (it as? Map<*, *>)?.get("text") as? String }.joinToString("").trim()
             .ifEmpty { throw Json.ParseError("Empty answer") }
+        if (cand["finishReason"] != "MAX_TOKENS") return text
+        // Cut off: keep the whole sentences (or bullets), never half of one.
+        val end = maxOf(text.lastIndexOf(". "), text.lastIndexOf(".\n"), text.lastIndexOf('\n'), if (text.endsWith(".")) text.length - 1 else -1)
+        if (end <= 0) throw Json.ParseError("Gemini's answer was cut off; tap Regenerate")
+        return text.substring(0, end + 1).trim()
     }
 }
 

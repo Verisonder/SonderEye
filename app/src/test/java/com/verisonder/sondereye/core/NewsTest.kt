@@ -86,6 +86,12 @@ class NewsTest {
         assertTrue(t.contains("in French") && t.contains("at most 3 short bullet points") && t.contains("\"Morocco\""))
         val ok = """{"candidates":[{"content":{"parts":[{"text":"Calm day. "},{"text":"Storm offshore."}]}}]}"""
         assertEquals("Calm day. Storm offshore.", Gemini.parse(ok))
+        assertTrue(body.contains("\"thinkingBudget\":0") && body.contains("\"maxOutputTokens\":2048"))
+        assertTrue(!Gemini.request(emptyList(), null, null, model = "gemini-flash-latest").contains("thinkingBudget"))
+        val cut = """{"candidates":[{"content":{"parts":[{"text":"Calm day. Storm offshore. Today's weather is 28 and"}]},"finishReason":"MAX_TOKENS"}]}"""
+        assertEquals("Calm day. Storm offshore.", Gemini.parse(cut))
+        val thought = """{"candidates":[{"content":{"parts":[{"text":"thinking...","thought":true},{"text":"Calm day."}]},"finishReason":"STOP"}]}"""
+        assertEquals("Calm day.", Gemini.parse(thought))
         try { Gemini.parse("""{"error":{"code":400,"message":"API key not valid"}}"""); throw AssertionError() } catch (e: Json.ParseError) {
             assertEquals("API key not valid", e.message)
         }
