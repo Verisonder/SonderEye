@@ -160,6 +160,8 @@ class Actions(
     /** Open (true) or close the day's brief. */
     val brief: (Boolean) -> Unit,
     val reloadBrief: () -> Unit,
+    /** Ask Gemini again, with the same stories. */
+    val regenerateSummary: () -> Unit,
     val briefPrefs: (BriefPrefs) -> Unit,
 )
 
@@ -1034,19 +1036,28 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
 
             HorizontalDivider(Modifier.padding(vertical = 14.dp), color = Palette.line)
 
-            // The written brief (Gemini), when there is a key.
+            // The written brief (Gemini), when there is a key: made on the first open of the day.
             val summary = b.summary
-            when {
-                summary != null -> {
-                    Text(summary, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp)
-                    Text("Written by Gemini from the headlines below.", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-                }
-                b.summaryProblem != null -> Text(b.summaryProblem!!, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp))
-                state.keys.gemini.isEmpty() && !b.loading -> Text(
+            if (state.keys.gemini.isEmpty()) {
+                if (!b.loading) Text(
                     "Add a Google Gemini key in the menu, under API keys, for a written summary on top.",
                     color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp),
                 )
-                state.keys.gemini.isNotEmpty() && b.stories.isNotEmpty() -> Text("Writing the summary…", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 10.dp))
+            } else {
+                if (summary != null) Text(summary, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp)
+                else if (b.writing) Text("Writing today's summary…", color = Palette.dim, fontSize = 14.sp)
+                b.summaryProblem?.let { Text(it, color = Palette.error, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                    Text(
+                        if (summary != null) "Written by Gemini from the headlines below" + (b.loadedAt.takeIf { it > 0 }?.let { ", ${clock(it)}" } ?: "") + "." else "",
+                        color = Palette.dim, fontSize = 12.sp, modifier = Modifier.weight(1f),
+                    )
+                    if (b.writing) {
+                        CircularProgressIndicator(Modifier.size(16.dp), color = Palette.magenta, strokeWidth = 2.dp)
+                    } else if (b.stories.isNotEmpty()) {
+                        TextButton(onClick = actions.regenerateSummary) { Text(if (summary == null) "Write summary" else "Regenerate", color = Palette.accent) }
+                    }
+                }
             }
 
             if (b.loading) Text("Getting today's news…", color = Palette.dim, fontSize = 14.sp)

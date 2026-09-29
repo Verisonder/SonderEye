@@ -26,6 +26,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.verisonder.sondereye.core.Ais
 import com.verisonder.sondereye.core.Camera
 import com.verisonder.sondereye.core.Hotspot
+import com.verisonder.sondereye.core.BriefCache
 import com.verisonder.sondereye.core.BriefPrefs
 import com.verisonder.sondereye.core.News
 import com.verisonder.sondereye.core.Ship
@@ -121,6 +122,12 @@ class BriefState {
     var summary by mutableStateOf<String?>(null)
     var summaryProblem by mutableStateOf<String?>(null)
     var loadedAt = 0L
+    /** When the weather part was last fetched. */
+    var weatherAt = 0L
+    /** Local date ("2026-09-29") the news and summary were made for. */
+    var day by mutableStateOf<String?>(null)
+    /** The written summary is being made (first time today, or regenerating). */
+    var writing by mutableStateOf(false)
     var prefs by mutableStateOf(BriefPrefs())
     /** The customise section is open. */
     var editing by mutableStateOf(false)
@@ -305,11 +312,13 @@ class MainActivity : ComponentActivity() {
                             if (open) {
                                 state.layersOpen = false
                                 state.search.open = false
-                                // Reuse a brief less than 20 minutes old.
-                                if (System.currentTimeMillis() - state.brief.loadedAt > 20 * 60_000L) loadBrief()
+                                // Weather goes stale in minutes; the news and summary are made once a day.
+                                if (System.currentTimeMillis() - state.brief.weatherAt > 20 * 60_000L) loadBriefWeather()
+                                if (state.brief.day != today() && !state.brief.loading) loadBriefNews()
                             }
                         },
-                        reloadBrief = ::loadBrief,
+                        reloadBrief = { loadBriefWeather(); loadBriefNews() },
+                        regenerateSummary = { loadBriefNews(summaryOnly = true) },
                         briefPrefs = { p ->
                             state.brief.prefs = p
                             store.saveBrief(p)
@@ -326,6 +335,7 @@ class MainActivity : ComponentActivity() {
 
         refreshAll()
         if (state.layers.passAlerts) schedulePassAlerts()
+        restoreBrief()
 
         // Position readout: four times a second, and only when it changed.
         lifecycleScope.launch {
@@ -360,6 +370,11 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 if (state.layers.location && hasLocationPermission()) where.start()
+                // First time the app is on screen today: make today's brief in the background.
+                if (state.brief.day != today() && !state.brief.loading) {
+                    loadBriefWeather()
+                    loadBriefNews()
+                }
                 try {
                     var tick = 0L
                     while (true) {
@@ -477,15 +492,25 @@ class MainActivity : ComponentActivity() {
 
     // ---- Daily brief --------------------------------------------------------------------
 
-    private fun loadBrief() {
+    private fun today(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())
+
+    private val briefFile get() = File(filesDir, "brief.json")
+
+    /** Today's brief from the phone, if it was already made today. */
+    private fun restoreBrief() {
+        val saved = runCatching { BriefCache.decode(briefFile.readText()) }.getOrNull() ?: return
+        if (saved.day != today()) return
         val b = state.brief
-        b.loading = true
-        b.newsProblems = emptyList()
-        b.summary = null
-        b.summaryProblem = null
-        run("brief") {
-            // Weather where you are (or where you last were).
-            val p = b.prefs
+        b.day = saved.day
+        b.stories = saved.stories
+        b.summary = saved.summary
+        b.loadedAt = saved.atMs
+    }
+
+    private fun loadBriefWeather() {
+        val b = state.brief
+        val p = b.prefs
+        run("brief-weather") {
             val here = state.me?.let { doubleArrayOf(it.latitude, it.longitude) } ?: store.home()
             if (!p.weather) {
                 b.weather = null; b.forecast = null; b.weatherProblem = null
@@ -493,36 +518,62 @@ class MainActivity : ComponentActivity() {
                 b.weatherProblem = "Weather: your location is not known yet. Tap the pin once, then open this again."
             } else {
                 when (val w = withContext(Dispatchers.IO) { Feeds.forecast(here[0], here[1]) }) {
-                    is Net.Outcome.Ok -> { b.weather = w.value.first; b.forecast = w.value.second; b.weatherProblem = null }
+                    is Net.Outcome.Ok -> { b.weather = w.value.first; b.forecast = w.value.second; b.weatherProblem = null; b.weatherAt = System.currentTimeMillis() }
                     is Net.Outcome.Failed -> b.weatherProblem = w.message
                 }
             }
-            // Every feed at once; one failing does not stop the others.
-            val results = withContext(Dispatchers.IO) {
-                News.sourcesFor(p).map { src -> async { Feeds.news(src) } }.map { it.await() }
+        }
+    }
+
+    /**
+     * Today's stories and, with a Gemini key, the written summary. Made on the first open
+     * of each day and on "Regenerate"; saved on the phone for the rest of the day. A failed
+     * regeneration keeps the summary that was there.
+     */
+    private fun loadBriefNews(summaryOnly: Boolean = false) {
+        val b = state.brief
+        val p = b.prefs
+        b.loading = !summaryOnly
+        b.newsProblems = if (summaryOnly) b.newsProblems else emptyList()
+        b.summaryProblem = null
+        run("brief") {
+            if (!summaryOnly) {
+                // Every feed at once; one failing does not stop the others.
+                val results = withContext(Dispatchers.IO) {
+                    News.sourcesFor(p).map { src -> async { Feeds.news(src) } }.map { it.await() }
+                }
+                val stories = ArrayList<Story>()
+                val problems = ArrayList<String>()
+                for (r in results) when (r) {
+                    is Net.Outcome.Ok -> stories.addAll(r.value)
+                    is Net.Outcome.Failed -> problems.add(r.message)
+                }
+                if (News.sourcesFor(p).isEmpty()) problems.add("News: no sources chosen. Tap Customise.")
+                val fresh = News.today(News.filter(stories, p.include, p.exclude), System.currentTimeMillis(), p.stories)
+                b.newsProblems = problems
+                // Every feed failed (no connection): keep what we had rather than blank it.
+                if (fresh.isNotEmpty() || b.stories.isEmpty()) b.stories = fresh
+                b.loadedAt = System.currentTimeMillis()
+                b.loading = false
             }
-            val stories = ArrayList<Story>()
-            val problems = ArrayList<String>()
-            for (r in results) when (r) {
-                is Net.Outcome.Ok -> stories.addAll(r.value)
-                is Net.Outcome.Failed -> problems.add(r.message)
-            }
-            b.stories = News.today(News.filter(stories, p.include, p.exclude), System.currentTimeMillis(), p.stories)
-            if (News.sourcesFor(p).isEmpty()) problems.add("News: no sources chosen. Tap Customise.")
-            b.newsProblems = problems
-            b.loadedAt = System.currentTimeMillis()
-            b.loading = false
             // The written brief, only with the user's own Gemini key.
             val key = state.keys.gemini
             if (key.isNotEmpty() && b.stories.isNotEmpty()) {
+                b.writing = true
                 val weatherLine = b.weather?.let { w ->
                     val d = b.forecast?.days?.firstOrNull()
                     "${w.tempC.roundToInt()} °C now, ${w.description.lowercase()}" + (d?.let { ", high ${it.maxC.roundToInt()} °C, low ${it.minC.roundToInt()} °C" } ?: "")
                 }
-                when (val s = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null, p) }) {
-                    is Net.Outcome.Ok -> b.summary = s.value
-                    is Net.Outcome.Failed -> b.summaryProblem = s.message
+                when (val out = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null, p) }) {
+                    is Net.Outcome.Ok -> b.summary = out.value
+                    is Net.Outcome.Failed -> b.summaryProblem = out.message // the previous summary stays
                 }
+                b.writing = false
+            }
+            if (b.stories.isNotEmpty()) {
+                b.day = today()
+                val text = BriefCache.encode(today(), b.loadedAt, b.summary, b.stories)
+                withContext(Dispatchers.IO) { runCatching { briefFile.writeText(text) } }
             }
         }
     }

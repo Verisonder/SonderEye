@@ -200,3 +200,37 @@ object Gemini {
             .ifEmpty { throw Json.ParseError("Empty answer") }
     }
 }
+
+/** The day's brief as saved on the phone, so it is made once a day, not on every open. */
+object BriefCache {
+    class Saved(val day: String, val atMs: Long, val summary: String?, val stories: List<Story>)
+
+    fun encode(day: String, atMs: Long, summary: String?, stories: List<Story>): String = buildString {
+        append("{\"day\":").append(Json.str(day))
+        append(",\"at\":").append(atMs)
+        append(",\"summary\":").append(if (summary == null) "null" else Json.str(summary))
+        append(",\"stories\":[")
+        stories.forEachIndexed { i, s ->
+            if (i > 0) append(',')
+            append("{\"src\":").append(Json.str(s.source))
+            append(",\"t\":").append(Json.str(s.title))
+            append(",\"sum\":").append(Json.str(s.summary))
+            append(",\"l\":").append(Json.str(s.link))
+            append(",\"ms\":").append(s.timeMs?.toString() ?: "null").append('}')
+        }
+        append("]}")
+    }
+
+    fun decode(text: String): Saved? = runCatching {
+        val m = Json.parse(text) as Map<*, *>
+        Saved(
+            m["day"] as String,
+            (m["at"] as Double).toLong(),
+            m["summary"] as? String,
+            (m["stories"] as List<*>).map {
+                val s = it as Map<*, *>
+                Story(s["src"] as String, s["t"] as String, s["sum"] as String, s["l"] as String, (s["ms"] as? Double)?.toLong())
+            },
+        )
+    }.getOrNull()
+}

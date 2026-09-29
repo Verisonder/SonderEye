@@ -65,6 +65,18 @@ class NewsTest {
         assertEquals(3, News.filter(st, "", "").size)
     }
 
+    @Test fun briefCacheRoundTrip() {
+        val st = listOf(Story("BBC", "Title \"quoted\"", "Line one.\nLine two.", "https://x", 1790640000000L), Story("HN", "No time", "", "", null))
+        val text = BriefCache.encode("2026-09-29", 1790641000000L, "Calm day.\n- point", st)
+        val back = BriefCache.decode(text)!!
+        assertEquals("2026-09-29", back.day)
+        assertEquals(1790641000000L, back.atMs)
+        assertEquals("Calm day.\n- point", back.summary)
+        assertEquals(st, back.stories)
+        assertNull(BriefCache.decode(BriefCache.encode("d", 0, null, emptyList()))!!.summary)
+        assertNull(BriefCache.decode("garbage"))
+    }
+
     @Test fun gemini() {
         val body = Gemini.request(listOf(Story("BBC", "T", "S", "l", 0)), "22 °C, clear", "Tangier")
         val prompt = ((((Json.parse(body) as Map<*, *>)["contents"] as List<*>)[0] as Map<*, *>)["parts"] as List<*>)[0] as Map<*, *>
