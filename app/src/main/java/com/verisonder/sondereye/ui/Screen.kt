@@ -430,7 +430,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
         if (l.radar) {
             any = true
             val at = state.radarFrameAt
-            LayerLine(Color(0xFF3FA7FF), "Rain radar", if (at == null) "loading…" else "past hour, now showing ${clock(at)}")
+            LayerLine(Color(0xFF3FA7FF), "Rain radar", if (at == null) "loading…" else if (l.radarLoop) "past hour, now showing ${clock(at)}" else "as of ${clock(at)}")
         }
         if (l.cameras) {
             any = true
@@ -1268,6 +1268,7 @@ private fun LayersPanel(
 
             Divider()
             Section("Rain radar", "RainViewer, last 10 minutes; long-press anywhere for its weather", s.radar) { change(s.copy(radar = it)) }
+            Toggle("Loop the past hour", s.radarLoop, s.radar) { change(s.copy(radarLoop = it)) }
 
             Divider()
             Section("Flights", "adsb.lol, near the screen centre, every 10 s", s.flights) { change(s.copy(flights = it)) }

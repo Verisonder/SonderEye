@@ -54,6 +54,8 @@ data class Layers(
     val lightPanels: Boolean = false,
     /** North stays up (long-press the N key). */
     val northLock: Boolean = false,
+    /** Loop the radar over the past hour (six frames of imagery: heavier). */
+    val radarLoop: Boolean = false,
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
@@ -89,6 +91,7 @@ class Settings(context: Context) {
             credits = prefs.getBoolean("map.credits", d.credits),
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
+            radarLoop = prefs.getBoolean("weather.radarLoop", d.radarLoop),
         )
     }
 
@@ -118,6 +121,7 @@ class Settings(context: Context) {
             .putBoolean("map.credits", s.credits)
             .putBoolean("ui.lightPanels", s.lightPanels)
             .putBoolean("ui.northLock", s.northLock)
+            .putBoolean("weather.radarLoop", s.radarLoop)
             .apply()
     }
 

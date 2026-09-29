@@ -355,7 +355,7 @@ class MainActivity : ComponentActivity() {
                 var i = 0
                 while (true) {
                     val frames = state.radar.items.drop(1).takeLast(RADAR_FRAMES)
-                    if (state.layers.radar && frames.isNotEmpty()) {
+                    if (state.layers.radar && state.layers.radarLoop && frames.isNotEmpty()) {
                         i = (i + 1) % frames.size
                         radarFrame = frames[i]
                         applyMap()
@@ -425,6 +425,10 @@ class MainActivity : ComponentActivity() {
         if (new.webcams != old.webcams) loadWebcams(force = true)
         if (new.fires != old.fires) loadFires(force = true)
         if (new.radar != old.radar) loadRadar()
+        if (new.radarLoop != old.radarLoop && !new.radarLoop) {
+            radarFrame = null // back to the latest frame
+            applyMap()
+        }
         if (new.passAlerts != old.passAlerts) {
             if (new.passAlerts) enablePassAlerts() else {
                 PassAlerts.cancel(this)
@@ -468,8 +472,8 @@ class MainActivity : ComponentActivity() {
         val r = state.radar.items
         val frame = radarFrame ?: r.lastOrNull()
         if (l.radar && r.size >= 2 && frame != null) {
-            overlays.add(TileSource.radar(r[0], frame))
-            state.radarFrameAt = frame.substringAfterLast('/').toLongOrNull()?.times(1000)
+            overlays.add(TileSource.radar(r[0], com.verisonder.sondereye.core.RainViewer.framePath(frame)))
+            state.radarFrameAt = com.verisonder.sondereye.core.RainViewer.frameTimeMs(frame) ?: state.radar.updatedAt
         }
         globe?.setMap(base, overlays)
         globe?.setDayNight(l.dayNight)

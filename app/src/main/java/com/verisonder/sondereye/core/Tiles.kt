@@ -75,15 +75,25 @@ class TileSource(
 object RainViewer {
     const val URL = "https://api.rainviewer.com/public/weather-maps.json"
 
-    /** [host, paths of the past frames, oldest first] for the animation. */
+    /**
+     * [host, past frames oldest first]. Each frame is "unixSeconds|path": the time comes
+     * from the frame's own "time" field (paths are opaque and need not contain it).
+     */
     fun frames(text: String): Pair<String, List<String>> {
         val root = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
         val host = root["host"] as? String ?: throw Json.ParseError("No host")
         val past = (root["radar"] as? Map<*, *>)?.get("past") as? List<*> ?: throw Json.ParseError("No radar frames")
-        val paths = past.mapNotNull { (it as? Map<*, *>)?.get("path") as? String }
-        if (paths.isEmpty()) throw Json.ParseError("No radar frames")
-        return host to paths
+        val frames = past.mapNotNull { f ->
+            val m = f as? Map<*, *> ?: return@mapNotNull null
+            val path = m["path"] as? String ?: return@mapNotNull null
+            "${(m["time"] as? Double)?.toLong() ?: 0}|$path"
+        }
+        if (frames.isEmpty()) throw Json.ParseError("No radar frames")
+        return host to frames
     }
+
+    fun frameTimeMs(frame: String): Long? = frame.substringBefore('|').toLongOrNull()?.takeIf { it > 0 }?.times(1000)
+    fun framePath(frame: String): String = frame.substringAfter('|')
 
     /** [host, path] of the latest past frame. */
     fun latest(text: String): Pair<String, String> {

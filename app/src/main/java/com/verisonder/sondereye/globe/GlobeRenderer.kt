@@ -193,6 +193,7 @@ class GlobeRenderer(
         }
         /** Tiles whose own base imagery has arrived: overlays wait for these. */
         val baseReady = HashSet<TileKey>()
+        usedThisFrame.clear()
         var loading = 0
         GLES30.glUseProgram(tileProg)
         val uMvp = GLES30.glGetUniformLocation(tileProg, "uMvp")
@@ -223,7 +224,11 @@ class GlobeRenderer(
 
         val baseSrc = base
         // Night lights only make sense with the night side shaded.
-        val overlaySrcs = overlays.filter { !it.night || (shading && lightsK > 0f) }
+        val overlaySrcs = overlays.filter {
+            (!it.night || (shading && lightsK > 0f)) &&
+                // Roads are unreadable from far out and would cost a tile per tile: regional zoom only.
+                !(it.id == "esri-roads" && alt > ROADS_MAX_ALT)
+        }
         // Base first, opaque; then each overlay over it on the same meshes.
         for ((pass, src) in (listOf(baseSrc) + overlaySrcs).withIndex()) {
             if (pass >= 1) {
@@ -277,6 +282,7 @@ class GlobeRenderer(
                 GLES30.glUniformMatrix4fv(uMvp, 1, false, mvp, 0)
                 GLES30.glUniform3f(uCenter, c.x.toFloat(), c.y.toFloat(), c.z.toFloat())
                 if (found != null) {
+                    usedThisFrame.add(found)
                     val uv = k.uvIn(found.key)
                     GLES30.glUniform3f(uUv, uv[0].toFloat(), uv[1].toFloat(), uv[2].toFloat())
                     GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textures[found]!!)
@@ -611,6 +617,9 @@ class GlobeRenderer(
      * Drops the least recently used textures above the cap, but never zoom 0–3 of the base
      * map or the bundled globe: that coarse backbone is what fills in anywhere you move.
      */
+    /** Textures drawn in the current frame: never dropped, or the cache would thrash. */
+    private val usedThisFrame = HashSet<SourcedTile>()
+
     private fun trimTextures() {
         var excess = textures.size - TEXTURE_CAP
         if (excess <= 0) return
@@ -618,6 +627,7 @@ class GlobeRenderer(
         while (excess > 0 && it.hasNext()) {
             val e = it.next()
             val k = e.key
+            if (k in usedThisFrame) continue
             if (k.key.z <= 3 && (k.source === base || k.source === TileSource.BLUE_MARBLE)) continue
             GLES30.glDeleteTextures(1, intArrayOf(e.value), 0)
             it.remove()
@@ -718,6 +728,8 @@ void main() {
     float light = mix(1.0, mix(uFloor, 1.0, day), uShade);
     outColor = vec4(c.rgb * light, c.a * uAlpha);
 }"""
+
+        private const val ROADS_MAX_ALT = 1_500_000.0
 
         /** Above this height a marker is in orbit and faces the screen. */
         private const val ORBIT_M = 50_000.0

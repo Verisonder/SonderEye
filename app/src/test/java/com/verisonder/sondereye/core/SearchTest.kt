@@ -42,9 +42,12 @@ class SearchTest {
     }
 
     @Test fun radarFrames() {
-        val (host, frames) = RainViewer.frames("""{"host":"https://h","radar":{"past":[{"path":"/a"},{"path":"/b"}]}}""")
+        val (host, frames) = RainViewer.frames("""{"host":"https://h","radar":{"past":[{"time":1790636400,"path":"/v2/radar/9f3a1c"},{"path":"/b"}]}}""")
         assertEquals("https://h", host)
-        assertEquals(listOf("/a", "/b"), frames)
+        assertEquals("/v2/radar/9f3a1c", RainViewer.framePath(frames[0]))
+        assertEquals(1790636400000L, RainViewer.frameTimeMs(frames[0]))
+        assertEquals("/b", RainViewer.framePath(frames[1]))
+        assertEquals(null, RainViewer.frameTimeMs(frames[1])) // no time given: unknown, not 1970
     }
 
     @Test fun deadReckoning() {
