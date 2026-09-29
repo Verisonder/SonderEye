@@ -93,5 +93,5 @@ More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 GPL-3.0-only. See [LICENSE](LICENSE).
 
-Bundled typeface: Barlow Semi Condensed, SIL Open Font License 1.1 ([licenses/Barlow-OFL.txt](licenses/Barlow-OFL.txt)).
+Bundled typeface: Roboto Condensed, SIL Open Font License 1.1 ([licenses/RobotoCondensed-OFL.txt](licenses/RobotoCondensed-OFL.txt)).
 The S in the logo is drawn from Audiowide, SIL Open Font License 1.1 ([licenses/Audiowide-OFL.txt](licenses/Audiowide-OFL.txt)).

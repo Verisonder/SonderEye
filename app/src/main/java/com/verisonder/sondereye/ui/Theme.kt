@@ -13,14 +13,18 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Shapes
+import androidx.compose.ui.graphics.Shadow
 import com.verisonder.sondereye.R
 
 /*
- * Radar scope: dark scope glass, phosphor-green signal, pale phosphor text, a green
- * hairline edge. Green is what radar and air-traffic screens glow in, and this app is
- * a scope on the planet's traffic. Links stay a quiet cyan; problems are warning red.
- * One typeface, Barlow Semi Condensed.
+ * Wasteland terminal: everything in one phosphor green on near-black, as on a Pip-Boy.
+ * Bright green for what matters and what is picked (picked rows are solid green with dark
+ * text), a darker green for what is secondary or off, thin green frames with square
+ * corners, and a faint glow on the text. Problems stay red. One typeface, Roboto Condensed.
  */
 object Palette {
     /** Dark scope panels (default) or light ones; switched in the menu. */
@@ -28,18 +32,22 @@ object Palette {
 
     val space = Color(0xFF03060A)
     // Opaque: the globe must never show through text.
-    val panel get() = if (dark) Color(0xFF06110B) else Color(0xFFF4FAF6)
-    val line get() = if (dark) Color(0xFF1C4630) else Color(0xFFC9DDD0)
-    val text get() = if (dark) Color(0xFFD4F7E0) else Color(0xFF0E1F15)
-    val dim get() = if (dark) Color(0xFF6FA887) else Color(0xFF4F6B5A)
-    /** Phosphor green: the sweep, north, the active key, what needs attention. */
-    val signal get() = if (dark) Color(0xFF5CF28E) else Color(0xFF0B7A3E)
+    val panel get() = if (dark) Color(0xFF07120B) else Color(0xFFF4FAF6)
+    /** Frames and dividers: a green you can see, not a hairline you can't. */
+    val line get() = if (dark) Color(0xFF1B9E55) else Color(0xFFC9DDD0)
+    val text get() = if (dark) Color(0xFF2EF08A) else Color(0xFF0E1F15)
+    /** Secondary and unavailable: the darker green of a greyed-out Pip-Boy row. */
+    val dim get() = if (dark) Color(0xFF14A353) else Color(0xFF4F6B5A)
+    /** Full phosphor: picked rows, active keys, north, the sweep. */
+    val signal get() = if (dark) Color(0xFF1AFF80) else Color(0xFF0B7A3E)
     /** Text on a solid signal background. */
-    val onSignal get() = if (dark) Color(0xFF03140A) else Color.White
+    val onSignal get() = if (dark) Color(0xFF03130A) else Color.White
+    /** The glow around text; none on light panels. */
+    val glow get() = if (dark) Color(0x881AFF80) else Color.Transparent
     /** Phosphor green drawn straight over the globe (scope, readout, scale bar): always bright. */
     val scope = Color(0xFF7DF5A5)
     /** Links and actions. */
-    val accent get() = if (dark) Color(0xFF8FD8FF) else Color(0xFF1D5BA6)
+    val accent get() = if (dark) Color(0xFF1AFF80) else Color(0xFF1D5BA6)
     val error get() = if (dark) Color(0xFFFF6B57) else Color(0xFFC62828)
 
     // Marker colours on the globe (dark background).
@@ -75,19 +83,23 @@ object Palette {
     }
 }
 
-val Barlow = FontFamily(
-    Font(R.font.barlow_sc_regular, FontWeight.Normal),
-    Font(R.font.barlow_sc_medium, FontWeight.Medium),
-    Font(R.font.barlow_sc_semibold, FontWeight.SemiBold),
-    Font(R.font.barlow_sc_semibold, FontWeight.Bold),
+val Hud = FontFamily(
+    Font(R.font.roboto_condensed_regular, FontWeight.Normal),
+    Font(R.font.roboto_condensed_medium, FontWeight.Medium),
+    Font(R.font.roboto_condensed_bold, FontWeight.SemiBold),
+    Font(R.font.roboto_condensed_bold, FontWeight.Bold),
 )
 
+/** The phosphor glow every piece of text carries. */
+val Glow get() = Shadow(Palette.glow, blurRadius = 7f)
+
 /** Tabular figures, so coordinates and counts do not jiggle as they change. */
-val Figures = TextStyle(fontFamily = Barlow, fontFeatureSettings = "tnum")
+val Figures get() = TextStyle(fontFamily = Hud, fontFeatureSettings = "tnum", shadow = Glow)
 
 @Composable
 fun EyeTheme(content: @Composable () -> Unit) {
-    val base = TextStyle(fontFamily = Barlow)
+    val base = TextStyle(fontFamily = Hud, shadow = Glow)
+    val square = RoundedCornerShape(2.dp)
     MaterialTheme(
         colorScheme = if (Palette.dark) darkColorScheme(
             primary = Palette.signal,
@@ -122,6 +134,8 @@ fun EyeTheme(content: @Composable () -> Unit) {
             labelLarge = base.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium),
             labelMedium = base.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
         ),
+        // Square corners everywhere, as on a terminal.
+        shapes = Shapes(extraSmall = square, small = square, medium = square, large = square, extraLarge = square),
         content = content,
     )
 }

@@ -14,6 +14,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -75,16 +77,13 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -185,7 +184,7 @@ class Actions(
 
 private class LastSel { var sel: Sel? = null }
 
-private val PanelShape = RoundedCornerShape(16.dp)
+private val PanelShape = RoundedCornerShape(2.dp)
 
 @Composable
 fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
@@ -235,7 +234,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(top = 12.dp)
                     .size(width = 30.dp, height = 56.dp)
-                    .background(Palette.panel.copy(alpha = 0.75f), RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
+                    .background(Palette.panel.copy(alpha = 0.75f), RoundedCornerShape(2.dp))
                     .clickable { state.chromeHidden = false },
                 contentAlignment = Alignment.Center,
             ) {
@@ -276,9 +275,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(12.dp)
                 .heightIn(max = stripMax.dp)
-                .clip(RoundedCornerShape(14.dp)) // nothing inside may poke past the corners
+                .clip(RoundedCornerShape(2.dp)) // nothing inside may poke past the corners
                 .background(Palette.panel)
-                .border(1.dp, Palette.line, RoundedCornerShape(14.dp))
+                .border(1.dp, Palette.line, RoundedCornerShape(2.dp))
                 .verticalScroll(rememberScrollState()),
         ) {
             Tool(Icons.Default.KeyboardArrowRight, "Hide the controls (the tab on the right brings them back)", false) {
@@ -297,7 +296,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Modifier
                     .size(48.dp)
                     .padding(6.dp)
-                    .background(if (locked) Palette.signal else Color.Transparent, RoundedCornerShape(10.dp))
+                    .background(if (locked) Palette.signal else Color.Transparent, RoundedCornerShape(2.dp))
                     .pointerInput(locked) {
                         detectTapGestures(
                             onTap = { actions.northUp() },
@@ -567,7 +566,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         state.cameras.error, state.webcams.error, state.fires.error, state.busLines.error, state.buses.error, state.meProblem, state.alertProblem,
         state.shipsProblem, state.globeError,
     ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(2.dp)
     Column(
         modifier
             .background(Palette.panel, shape)
@@ -600,15 +599,15 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                     .align(Alignment.TopEnd)
                     .offset(x = 6.dp, y = (-4).dp)
                     .size(30.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (open) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(if (open) Palette.signal else Color.Transparent)
                     .clickable { open = !open },
                 Alignment.Center,
             ) {
                 Icon(
                     if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = if (open) "Hide the details" else "Show the details",
-                    tint = Palette.signal, modifier = Modifier.size(22.dp),
+                    tint = if (open) Palette.onSignal else Palette.signal, modifier = Modifier.size(22.dp),
                 )
             }
         }
@@ -707,7 +706,7 @@ private fun RadarScope(view: DoubleArray?, modifier: Modifier) {
     val heading = view?.getOrNull(3) ?: 0.0
     val measurer = rememberTextMeasurer()
     val green = Palette.scope // over the globe: always bright, whichever panels are chosen
-    val numStyle = TextStyle(fontFamily = Barlow, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = green.copy(alpha = 0.85f))
+    val numStyle = TextStyle(fontFamily = Hud, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = green.copy(alpha = 0.85f))
     val northStyle = numStyle.copy(color = green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     val ringStyle = numStyle.copy(fontSize = 10.sp, color = green.copy(alpha = 0.7f))
     val sweep by rememberInfiniteTransition(label = "sweep").animateFloat(
@@ -843,7 +842,7 @@ private fun Tool(
     Box(
         Modifier
             .size(48.dp)
-            .background(if (active) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (active) Palette.signal else Color.Transparent)
             .pointerInput(label) {
                 detectTapGestures(
                     onTap = { tap() },
@@ -860,7 +859,7 @@ private fun Tool(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, tint = if (active) Palette.signal else tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = label, tint = if (active) Palette.onSignal else tint, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -877,7 +876,7 @@ private fun ZoomKey(onTap: () -> Unit, onZoom: (Double) -> Unit) {
     Box(
         Modifier
             .size(48.dp)
-            .background(if (zooming) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (zooming) Palette.signal else Color.Transparent)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -912,7 +911,7 @@ private fun ZoomKey(onTap: () -> Unit, onZoom: (Double) -> Unit) {
     ) {
         Icon(
             EarthIcon, contentDescription = "Whole Earth. Hold to zoom in, slide down to zoom out",
-            tint = if (zooming) Palette.signal else Palette.text, modifier = Modifier.size(22.dp),
+            tint = if (zooming) Palette.onSignal else Palette.text, modifier = Modifier.size(22.dp),
         )
     }
 }
@@ -976,8 +975,8 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
     val close = { actions.select(null) }
     Surface(
         color = Palette.panel,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
+        shape = RoundedCornerShape(2.dp),
+        modifier = Modifier.border(1.dp, Palette.line, RoundedCornerShape(2.dp)),
     ) {
         // As wide as its longest line (up to the card's limit), not the whole limit.
         Column(Modifier.widthIn(min = 260.dp).width(IntrinsicSize.Max).padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)) {
@@ -1026,7 +1025,7 @@ private fun Line(text: String, color: Color = Palette.dim) {
 private fun LinkRow(left: String, button: String?, onClick: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(left, color = Palette.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        if (button != null) TextButton(onClick = onClick) { Text(button, color = Palette.accent) }
+        if (button != null) FoButton(button, onClick = onClick)
     }
 }
 
@@ -1076,7 +1075,7 @@ private fun ColumnScope.WebcamBody(w: Webcam, context: Context, onClose: () -> U
     when {
         bmp != null -> Image(
             bmp, contentDescription = w.title, contentScale = ContentScale.Crop,
-            modifier = Modifier.padding(end = 10.dp, top = 6.dp).fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(12.dp))
+            modifier = Modifier.padding(end = 10.dp, top = 6.dp).fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(2.dp))
                 .clickable { w.page?.let { openUrl(context, it) } },
         )
         failed != null -> Line(failed!!, Palette.error)
@@ -1164,11 +1163,9 @@ private fun ColumnScope.FlightBody(f: Flight, state: EyeState, actions: Actions,
     Line(parts.joinToString(", "))
     Row(verticalAlignment = Alignment.CenterVertically) {
         val on = state.following == f.hex
-        TextButton(onClick = { actions.follow(if (on) null else f.hex) }) {
-            Text(if (on) "Stop following" else "Follow", color = Palette.accent)
-        }
+        FoButton(if (on) "Stop following" else "Follow") { actions.follow(if (on) null else f.hex) }
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = { openUrl(context, "https://globe.adsb.lol/?icao=${f.hex}") }) { Text("Open on adsb.lol", color = Palette.accent) }
+        FoButton("Open on adsb.lol") { openUrl(context, "https://globe.adsb.lol/?icao=${f.hex}") }
     }
 }
 
@@ -1354,8 +1351,8 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
         .sortedByDescending { if (second) it.sortB else it.sortA }
     Surface(
         color = Palette.panel,
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(2.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(2.dp)),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1405,8 +1402,8 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
     val context = LocalContext.current
     Surface(
         color = Palette.panel,
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(18.dp)),
+        shape = RoundedCornerShape(2.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(2.dp)),
     ) {
         val maxH = (LocalConfiguration.current.screenHeightDp - 110).coerceAtLeast(240)
         Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState()).padding(18.dp)) {
@@ -1417,11 +1414,9 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
                 )
                 IconButton(onClick = { actions.brief(false) }) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
             }
-            TextButton(onClick = {
+            FoButton(if (b.editing) "Done, rebuild my brief" else "Customise") {
                 if (b.editing) actions.reloadBrief() // leaving the settings: rebuild with them
                 b.editing = !b.editing
-            }, modifier = Modifier.padding(start = 0.dp)) {
-                Text(if (b.editing) "Done, rebuild my brief" else "Customise", color = Palette.accent)
             }
             if (b.editing) BriefSettings(b.prefs, actions.briefPrefs)
 
@@ -1471,7 +1466,7 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
                     if (b.writing) {
                         CircularProgressIndicator(Modifier.size(16.dp), color = Palette.signal, strokeWidth = 2.dp)
                     } else if (b.stories.isNotEmpty()) {
-                        TextButton(onClick = actions.regenerateSummary) { Text(if (summary == null) "Write summary" else "Regenerate", color = Palette.accent) }
+                        FoButton(if (summary == null) "Write summary" else "Regenerate", onClick = actions.regenerateSummary)
                     }
                 }
             }
@@ -1497,7 +1492,7 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
                 }
             }
             if (!b.loading) {
-                TextButton(onClick = actions.reloadBrief, modifier = Modifier.padding(top = 6.dp)) { Text("Refresh", color = Palette.accent) }
+                FoButton("Refresh", modifier = Modifier.padding(top = 6.dp), onClick = actions.reloadBrief)
             }
         }
     }
@@ -1514,11 +1509,9 @@ private fun BriefSettings(p: BriefPrefs, set: (BriefPrefs) -> Unit) {
             Text(topic, color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (src in group) {
-                    FilterChip(
-                        selected = src.id in p.sources,
-                        onClick = { set(p.copy(sources = if (src.id in p.sources) p.sources - src.id else p.sources + src.id)) },
-                        label = { Text(src.name) },
-                    )
+                    FoChip(src.name, src.id in p.sources) {
+                        set(p.copy(sources = if (src.id in p.sources) p.sources - src.id else p.sources + src.id))
+                    }
                 }
             }
         }
@@ -1527,7 +1520,7 @@ private fun BriefSettings(p: BriefPrefs, set: (BriefPrefs) -> Unit) {
         for (url in p.custom) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(url, color = Palette.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                TextButton(onClick = { set(p.copy(custom = p.custom - url)) }) { Text("Remove", color = Palette.error) }
+                FoButton("Remove", color = Palette.error) { set(p.copy(custom = p.custom - url)) }
             }
         }
         var newFeed by remember { mutableStateOf("") }
@@ -1538,14 +1531,11 @@ private fun BriefSettings(p: BriefPrefs, set: (BriefPrefs) -> Unit) {
                 colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
                 modifier = Modifier.weight(1f),
             )
-            TextButton(
-                onClick = {
-                    val u = newFeed.trim().let { if (it.startsWith("http")) it else "https://$it" }
-                    if (u !in p.custom) set(p.copy(custom = p.custom + u))
-                    newFeed = ""
-                },
-                enabled = newFeed.contains('.'),
-            ) { Text("Add", color = Palette.accent) }
+            FoButton("Add", enabled = newFeed.contains('.')) {
+                val u = newFeed.trim().let { if (it.startsWith("http")) it else "https://$it" }
+                if (u !in p.custom) set(p.copy(custom = p.custom + u))
+                newFeed = ""
+            }
         }
 
         Label("Topics")
@@ -1583,8 +1573,8 @@ private fun TextSetting(hint: String, value: String, save: (String) -> Unit) {
 private fun SearchPanel(se: SearchState, actions: Actions) {
     Surface(
         color = Palette.panel,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
+        shape = RoundedCornerShape(2.dp),
+        modifier = Modifier.fillMaxWidth().border(1.dp, Palette.line, RoundedCornerShape(2.dp)),
     ) {
         Column(Modifier.padding(12.dp)) {
             OutlinedTextField(
@@ -1629,12 +1619,13 @@ private fun LayersPanel(
 ) {
     Surface(
         color = Palette.panel,
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.widthIn(max = 340.dp).border(1.dp, Palette.line, RoundedCornerShape(20.dp)),
+        shape = RoundedCornerShape(2.dp),
+        modifier = Modifier.widthIn(max = 340.dp).border(1.dp, Palette.line, RoundedCornerShape(2.dp)),
     ) {
         // Fits the screen in both orientations, scrolling inside.
         val maxH = (LocalConfiguration.current.screenHeightDp - 110).coerceAtLeast(200)
         Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
+            FoHeader("Layers", Modifier.padding(bottom = 10.dp))
             Section("Earthquakes", "USGS, updated every minute", s.quakes) { change(s.copy(quakes = it)) }
             Column(Modifier.alpha(if (s.quakes) 1f else 0.4f)) {
                 Label("Minimum magnitude")
@@ -1643,7 +1634,7 @@ private fun LayersPanel(
                 ChipRow(Period.entries, s.period, { it.label }, s.quakes) { change(s.copy(period = it)) }
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Refresh every 5 min", color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                    Switch(checked = s.autoRefresh, enabled = s.quakes, onCheckedChange = { change(s.copy(autoRefresh = it)) })
+                    Box(Modifier.clickable(enabled = s.quakes) { change(s.copy(autoRefresh = !s.autoRefresh)) }.padding(8.dp)) { CheckMark(s.autoRefresh, s.quakes) }
                 }
                 Label("Colour is depth, size is magnitude")
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1654,7 +1645,7 @@ private fun LayersPanel(
             }
 
             Divider()
-            Text("Map", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            FoHeader("Map", Modifier.padding(bottom = 6.dp))
             ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
             Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
                 Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
@@ -1704,7 +1695,7 @@ private fun LayersPanel(
             Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
 
             Divider()
-            Text("API keys", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            FoHeader("API keys")
             Text(
                 "Free, and kept on this phone only. Get a key opens the page where you sign up; paste the key here.",
                 color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp),
@@ -1733,7 +1724,7 @@ private fun LayersPanel(
                         color = Palette.dim, fontSize = 12.sp,
                     )
                 }
-                TextButton(onClick = clearCache, enabled = (cacheBytes ?: 0) > 0) { Text("Clear", color = Palette.accent) }
+                FoButton("Clear", enabled = (cacheBytes ?: 0) > 0, onClick = clearCache)
             }
         }
     }
@@ -1741,12 +1732,13 @@ private fun LayersPanel(
 
 @Composable
 private fun Section(title: String, sub: String, on: Boolean, toggle: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable { toggle(!on) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        CheckMark(on, true)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, color = if (on) Palette.signal else Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(sub, color = Palette.dim, fontSize = 12.sp)
         }
-        Switch(checked = on, onCheckedChange = toggle)
     }
 }
 
@@ -1765,7 +1757,7 @@ private fun KeyField(service: String, unlocks: String, saved: String, getUrl: St
                     color = if (saved.isEmpty()) Palette.dim else Palette.text, fontSize = 13.sp,
                 )
             }
-            TextButton(onClick = { openUrl(context, getUrl) }) { Text("Get a key", color = Palette.accent) }
+            FoButton("Get a key") { openUrl(context, getUrl) }
         }
         if (editing || saved.isEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1776,14 +1768,12 @@ private fun KeyField(service: String, unlocks: String, saved: String, getUrl: St
                     colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { save(text.trim()); text = ""; editing = false }, enabled = text.isNotBlank()) {
-                    Text("Save", color = Palette.accent)
-                }
+                FoButton("Save", enabled = text.isNotBlank()) { save(text.trim()); text = ""; editing = false }
             }
         } else {
             Row {
-                TextButton(onClick = { editing = true }) { Text("Replace key", color = Palette.accent) }
-                TextButton(onClick = { save("") }) { Text("Remove", color = Palette.error) }
+                FoButton("Replace key") { editing = true }
+                FoButton("Remove", color = Palette.error) { save("") }
             }
         }
     }
@@ -1791,9 +1781,90 @@ private fun KeyField(service: String, unlocks: String, saved: String, getUrl: St
 
 @Composable
 private fun Toggle(text: String, on: Boolean, enabled: Boolean, toggle: (Boolean) -> Unit) {
-    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp).clickable(enabled = enabled) { toggle(!on) }.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CheckMark(on, enabled)
+        Spacer(Modifier.width(10.dp))
         Text(text, color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
-        Switch(checked = on, enabled = enabled, onCheckedChange = toggle)
+    }
+}
+
+/** A terminal checkbox: a green square, filled when on. */
+@Composable
+private fun CheckMark(on: Boolean, enabled: Boolean) {
+    val c = if (enabled) Palette.signal else Palette.dim
+    Box(Modifier.size(16.dp).border(1.5.dp, c).padding(3.5.dp).background(if (on) c else Color.Transparent))
+}
+
+/**
+ * A terminal button: the label in capitals between thin square brackets, solid green
+ * while pressed.
+ */
+@Composable
+private fun FoButton(
+    label: String, color: Color = Palette.accent, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit,
+) {
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val c = if (enabled) color else Palette.dim.copy(alpha = 0.6f)
+    Box(
+        modifier
+            .padding(horizontal = 2.dp, vertical = 5.dp)
+            .clickable(interactionSource = source, indication = null, enabled = enabled, onClick = onClick)
+            .background(if (pressed) c else Color.Transparent)
+            .drawBehind {
+                val w = 1.5.dp.toPx()
+                val arm = 5.dp.toPx()
+                val h = size.height
+                val x = size.width
+                drawLine(c, Offset(w / 2, 0f), Offset(w / 2, h), w)
+                drawLine(c, Offset(0f, w / 2), Offset(arm, w / 2), w)
+                drawLine(c, Offset(0f, h - w / 2), Offset(arm, h - w / 2), w)
+                drawLine(c, Offset(x - w / 2, 0f), Offset(x - w / 2, h), w)
+                drawLine(c, Offset(x - arm, w / 2), Offset(x, w / 2), w)
+                drawLine(c, Offset(x - arm, h - w / 2), Offset(x, h - w / 2), w)
+            }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label.uppercase(), color = if (pressed) Palette.onSignal else c, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+}
+
+/** A choice in a row: solid green with dark text when picked, framed text otherwise. */
+@Composable
+private fun FoChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = if (enabled) Palette.signal else Palette.dim
+    Box(
+        Modifier
+            .background(if (selected) c else Color.Transparent)
+            .border(1.dp, if (selected) c else Palette.line)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, color = if (selected) Palette.onSignal else Palette.text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+/**
+ * A section title as on a terminal: capitals on a rule that runs to the edge and ends in
+ * a short tick.
+ */
+@Composable
+private fun FoHeader(text: String, modifier: Modifier = Modifier) {
+    val c = Palette.signal
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Text(text.uppercase(), color = c, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Box(
+            Modifier.weight(1f).height(14.dp).padding(start = 4.dp).drawBehind {
+                val w = 1.5.dp.toPx()
+                val y = size.height - w / 2 - 2.dp.toPx()
+                drawLine(c, Offset(0f, y), Offset(size.width, y), w)
+                drawLine(c, Offset(size.width - w / 2, y), Offset(size.width - w / 2, y - 7.dp.toPx()), w)
+            },
+        )
     }
 }
 
@@ -1814,12 +1885,7 @@ private fun <T> ChipRow(items: List<T>, selected: T, label: (T) -> String, enabl
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         items.forEach { item ->
-            FilterChip(
-                selected = item == selected,
-                onClick = { pick(item) },
-                enabled = enabled,
-                label = { Text(label(item)) },
-            )
+            FoChip(label(item), item == selected, enabled) { pick(item) }
         }
     }
 }

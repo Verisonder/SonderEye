@@ -117,8 +117,8 @@ class SkyActivity : ComponentActivity(), SensorEventListener {
                             .windowInsetsPadding(WindowInsets.safeDrawing)
                             .padding(12.dp)
                             .fillMaxWidth()
-                            .background(Palette.panel, RoundedCornerShape(16.dp))
-                            .border(1.dp, Palette.line, RoundedCornerShape(16.dp))
+                            .background(Palette.panel, RoundedCornerShape(2.dp))
+                            .border(1.dp, Palette.line, RoundedCornerShape(2.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         Text("Sky view", color = Palette.text, fontSize = 16.sp)
