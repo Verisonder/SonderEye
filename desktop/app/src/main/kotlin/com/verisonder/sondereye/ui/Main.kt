@@ -15,6 +15,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 
@@ -33,7 +34,8 @@ fun main() {
 
 private fun window() = application {
     val app = remember { arrayOfNulls<MainActivity>(1) }
-    val window = rememberWindowState(width = 1440.dp, height = 900.dp)
+    // Opens filling the screen: a fixed size ran off smaller screens.
+    val window = rememberWindowState(placement = WindowPlacement.Maximized, width = 1440.dp, height = 900.dp)
     Window(
         onCloseRequest = {
             app[0]?.close()
