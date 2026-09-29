@@ -1366,10 +1366,14 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
                 e.categoryTitle + (e.timeMs?.let { ", ${Fmt.ago(it, now).lowercase()}" } ?: ""),
                 (e.timeMs ?: 0).toDouble(), -e.category.first().code.toDouble())
         })
-        "fires" -> Triple("Fire hotspots", "Strongest" to "Newest", state.fires.items.map { h ->
-            ListRow(Sel.OfFire(h), Sym.DOT, Palette.fire, h.frpMw?.let { "Fire, %.1f MW".format(it) } ?: "Fire",
-                "%.3f, %.3f, seen %s UTC".format(h.lat, h.lon, h.acquired), h.frpMw ?: 0.0, h.acquired.hashCode().toDouble())
-        })
+        "fires" -> Triple(if (state.worldFires != null) "Fire hotspots worldwide" else "Fire hotspots", "Strongest" to "Newest",
+            // Up to 10,000 rows: built once per download, not on every tick of the clock.
+            remember(state.worldFires, state.fires.items) {
+                (state.worldFires ?: state.fires.items).map { h ->
+                    ListRow(Sel.OfFire(h), Sym.DOT, Palette.fire, h.frpMw?.let { "Fire, %.1f MW".format(it) } ?: "Fire",
+                        "%.3f, %.3f, seen %s UTC".format(h.lat, h.lon, h.acquired), h.frpMw ?: 0.0, h.acquired.hashCode().toDouble())
+                }
+            })
         "ships" -> Triple("Ships", "Fastest" to "Latest report", state.ships.values.map { sh ->
             ListRow(Sel.OfShip(sh), Sym.PLANE, Palette.ship, sh.name ?: "MMSI ${sh.mmsi}",
                 listOfNotNull(sh.sogKt?.let { "%.1f kn".format(it) }, Fmt.ago(sh.atMs, now).lowercase()).joinToString(", "),
@@ -1393,7 +1397,7 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
                 listOfNotNull(b.label?.let { "vehicle $it" }, b.atMs?.let { Fmt.ago(it, now).lowercase() }).joinToString(", "),
                 -i.toDouble(), (b.atMs ?: 0L).toDouble())
         })
-        "webcams" -> Triple("Webcams", "Name" to "Place", state.webcams.items.map { w ->
+        "webcams" -> Triple(if (state.worldWebcams != null) "Webcams worldwide" else "Webcams", "Name" to "Place", (state.worldWebcams ?: state.webcams.items).map { w ->
             ListRow(Sel.OfWebcam(w), Sym.DIAMOND, Palette.webcam, w.title, w.place ?: "", -w.title.first().code.toDouble(), -(w.place?.firstOrNull()?.code ?: 0).toDouble())
         })
         else -> Triple(layer, "" to "", emptyList())
@@ -1413,6 +1417,9 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
                 Text("${rows.size} ${name.lowercase()}", color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { actions.openList(null) }) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
             }
+            // Fires and webcams list the whole world, whatever the view shows.
+            if (state.worldLoading == layer) Text("Loading the whole world…", color = Palette.dim, fontSize = 13.sp)
+            if (layer == "fires" || layer == "webcams") state.worldError?.let { Text(it, color = Palette.error, fontSize = 13.sp) }
             if (orders.first.isNotEmpty()) {
                 ChipRow(listOf(false, true), second, { if (it) orders.second else orders.first }, true) { second = it }
             }

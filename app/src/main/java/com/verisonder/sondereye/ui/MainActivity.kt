@@ -209,6 +209,12 @@ class EyeState {
     var firesNote by mutableStateOf<String?>(null)
     /** Showing the strongest fires worldwide (from high up), not all of them around the view. */
     var firesWorld by mutableStateOf(false)
+    /** The whole world's fires and webcams, for their lists wherever the view is. */
+    var worldFires by mutableStateOf<List<Hotspot>?>(null)
+    var worldWebcams by mutableStateOf<List<Webcam>?>(null)
+    /** The list whose worldwide set is downloading, and why the last one failed. */
+    var worldLoading by mutableStateOf<String?>(null)
+    var worldError by mutableStateOf<String?>(null)
     /** Places in the news for fighting, last 24 h (GDELT). */
     val conflicts = Feed<Conflict>()
     /** Bus lines (one per direction) and their stops, OpenStreetMap. */
@@ -346,6 +352,7 @@ class MainActivity : ComponentActivity() {
                         northUp = { globe?.northUp() },
                         openList = { layer ->
                             state.listLayer = layer
+                            if (layer == "fires" || layer == "webcams") loadWorldFor(layer)
                             if (layer != null) {
                                 state.layersOpen = false; state.search.open = false; state.brief.open = false
                             }
@@ -353,9 +360,9 @@ class MainActivity : ComponentActivity() {
                         goTo = { sel ->
                             state.listLayer = null
                             select(sel)
-                            globe?.select(sel.key, fly = busPlace(sel) == null)
-                            // Buses and their lines are street-scale: stay close instead of flying out.
-                            busPlace(sel)?.let { p -> globe?.flyTo(p[0], p[1], globe!!.center()[2].coerceIn(1_500.0, BUS_FLY_ALT)) }
+                            val close = closePlace(sel)
+                            globe?.select(sel.key, fly = close == null)
+                            close?.let { (p, alt) -> globe?.flyTo(p[0], p[1], alt) }
                         },
                         brief = { open ->
                             state.brief.open = open
@@ -1083,6 +1090,54 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    /**
+     * Where to fly, and how high, for things seen close in: buses and their lines stay at
+     * street scale; a fire or webcam picked from the worldwide list goes low enough for its
+     * area to load around it. Null: the usual fly-to.
+     */
+    private fun closePlace(sel: Sel): Pair<DoubleArray, Double>? {
+        val alt = globe?.center()?.get(2) ?: return null
+        return when (sel) {
+            is Sel.OfFire -> doubleArrayOf(sel.h.lat, sel.h.lon) to FIRE_FLY_ALT
+            is Sel.OfWebcam -> doubleArrayOf(sel.w.lat, sel.w.lon) to WEBCAM_FLY_ALT
+            else -> busPlace(sel)?.let { it to alt.coerceIn(1_500.0, BUS_FLY_ALT) }
+        }
+    }
+
+    /** The worldwide set behind the fires or webcams list, downloaded if missing or old. */
+    private fun loadWorldFor(layer: String) {
+        val now = System.currentTimeMillis()
+        if (state.worldLoading == layer) return
+        when (layer) {
+            "fires" -> {
+                val key = state.keys.firms
+                if (key.isEmpty() || (state.worldFires != null && now - worldFiresAt < WORLD_FIRES_MS)) return
+                state.worldLoading = layer; state.worldError = null
+                run("worldFires") {
+                    val out = withContext(Dispatchers.IO) { map(Feeds.firesWorld(key)) { Firms.strongest(it, WORLD_FIRES) } }
+                    state.worldLoading = null
+                    when (out) {
+                        is Net.Outcome.Ok -> { state.worldFires = out.value; worldFiresAt = System.currentTimeMillis() }
+                        is Net.Outcome.Failed -> state.worldError = out.message
+                    }
+                }
+            }
+            "webcams" -> {
+                val key = state.keys.windy
+                if (key.isEmpty() || (state.worldWebcams != null && now - worldWebcamsAt < WORLD_WEBCAMS_MS)) return
+                state.worldLoading = layer; state.worldError = null
+                run("worldWebcams") {
+                    val out = withContext(Dispatchers.IO) { Feeds.topWebcams(key, WORLD_WEBCAM_PAGES) }
+                    state.worldLoading = null
+                    when (out) {
+                        is Net.Outcome.Ok -> { state.worldWebcams = out.value; worldWebcamsAt = System.currentTimeMillis() }
+                        is Net.Outcome.Failed -> state.worldError = out.message
+                    }
+                }
+            }
+        }
+    }
+
     /** Where to fly for a bus thing, or null when it is not one. */
     private fun busPlace(sel: Sel): DoubleArray? = when (sel) {
         is Sel.OfBusStop -> doubleArrayOf(sel.s.lat, sel.s.lon)
@@ -1263,11 +1318,11 @@ class MainActivity : ComponentActivity() {
         val now = System.currentTimeMillis()
         state.webcams.attemptAt = now
         state.webcamsNote = null
-        if (force) { webcamArea.centre = null; worldWebcams = null }
+        if (force) { webcamArea.centre = null; state.worldWebcams = null }
         if (c[2] > WEBCAMS_MAX_ALT) {
             // From high up: the most popular webcams on Earth. Image links expire after 15 min.
             webcamArea.centre = null
-            val cached = worldWebcams
+            val cached = state.worldWebcams
             if (cached != null && now - worldWebcamsAt < WORLD_WEBCAMS_MS) {
                 if (!state.webcamsWorld) {
                     state.webcamsWorld = true
@@ -1279,7 +1334,7 @@ class MainActivity : ComponentActivity() {
             run("webcams") {
                 val out = withContext(Dispatchers.IO) { Feeds.topWebcams(key, WORLD_WEBCAM_PAGES) }
                 if (out is Net.Outcome.Ok) {
-                    worldWebcams = out.value; worldWebcamsAt = System.currentTimeMillis()
+                    state.worldWebcams = out.value; worldWebcamsAt = System.currentTimeMillis()
                     state.webcamsWorld = true
                 }
                 settle(state.webcams, map(out) { it to 0 }, "webcams", ::webcamMarkers)
@@ -1298,7 +1353,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var worldWebcams: List<Webcam>? = null
     private var worldWebcamsAt = 0L
 
     private fun webcamMarkers(list: List<Webcam>) =
@@ -1315,11 +1369,11 @@ class MainActivity : ComponentActivity() {
         val now = System.currentTimeMillis()
         state.fires.attemptAt = now
         state.firesNote = null
-        if (force) { fireArea.centre = null; worldFires = null }
+        if (force) { fireArea.centre = null; state.worldFires = null }
         if (c[2] > FIRES_MAX_ALT) {
             // From high up: the strongest fires on Earth, one download kept for 30 minutes.
             fireArea.centre = null
-            val cached = worldFires
+            val cached = state.worldFires
             if (cached != null && now - worldFiresAt < WORLD_FIRES_MS) {
                 if (!state.firesWorld) {
                     state.firesWorld = true
@@ -1331,7 +1385,7 @@ class MainActivity : ComponentActivity() {
             run("fires") {
                 val out = withContext(Dispatchers.IO) { map(Feeds.firesWorld(key)) { Firms.strongest(it, WORLD_FIRES) } }
                 if (out is Net.Outcome.Ok) {
-                    worldFires = out.value; worldFiresAt = System.currentTimeMillis()
+                    state.worldFires = out.value; worldFiresAt = System.currentTimeMillis()
                     state.firesWorld = true
                 }
                 settle(state.fires, map(out) { it to 0 }, "fires", ::fireMarkers)
@@ -1351,7 +1405,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var worldFires: List<Hotspot>? = null
     private var worldFiresAt = 0L
 
     private fun fireMarkers(list: List<Hotspot>) = list.map { h ->
@@ -1477,8 +1530,9 @@ class MainActivity : ComponentActivity() {
         key.startsWith("s:") -> (state.sats.items + state.extraSats).firstOrNull { "s:" + it.tle.norad == key }?.let { Sel.OfSat(it) }
         key.startsWith("c:") -> state.cameras.items.firstOrNull { "c:" + it.id == key }?.let { Sel.OfCamera(it) }
         key.startsWith("v:") -> key.drop(2).toLongOrNull()?.let { state.ships[it] }?.let { Sel.OfShip(it) }
-        key.startsWith("w:") -> state.webcams.items.firstOrNull { "w:" + it.id == key }?.let { Sel.OfWebcam(it) }
-        key.startsWith("h:") -> state.fires.items.firstOrNull { Sel.OfFire(it).key == key }?.let { Sel.OfFire(it) }
+        // Near the view, or else in the worldwide set a list was showing.
+        key.startsWith("w:") -> (state.webcams.items.firstOrNull { "w:" + it.id == key } ?: state.worldWebcams?.firstOrNull { "w:" + it.id == key })?.let { Sel.OfWebcam(it) }
+        key.startsWith("h:") -> (state.fires.items.firstOrNull { Sel.OfFire(it).key == key } ?: state.worldFires?.firstOrNull { Sel.OfFire(it).key == key })?.let { Sel.OfFire(it) }
         key.startsWith("e:") -> state.events.items.firstOrNull { "e:" + it.id == key }?.let { Sel.OfEvent(it) }
         key.startsWith("x:") -> state.conflicts.items.firstOrNull { it.key == key }?.let { Sel.OfConflict(it) }
         key.startsWith("bs:") -> state.busStops.firstOrNull { "bs:" + it.id == key }?.let { Sel.OfBusStop(it) }
@@ -1604,6 +1658,9 @@ class MainActivity : ComponentActivity() {
         private const val BUS_STOPS_MAX_ALT = 12_000.0
         private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it
         private const val BUS_FLY_ALT = 8_000.0
+        /** Low enough for the area's own fires and webcams to load. */
+        private const val FIRE_FLY_ALT = 400_000.0
+        private const val WEBCAM_FLY_ALT = 40_000.0
         private const val BUSES_MAX_ALT = 300_000.0
         private const val BUSES_MS = 30_000L
         /** GDELT updates every 15 minutes. */
