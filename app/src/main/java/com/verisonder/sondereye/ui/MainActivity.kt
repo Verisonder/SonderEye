@@ -270,6 +270,7 @@ class MainActivity : ComponentActivity() {
                         },
                         clearCache = ::clearCache,
                         measureCache = ::measureCache,
+                        northUp = { globe?.northUp() },
                         saveKeys = { k ->
                             store.saveKeys(k)
                             state.keys = store.keys()

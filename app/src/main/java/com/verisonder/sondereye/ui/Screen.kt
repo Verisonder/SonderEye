@@ -16,7 +16,15 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -143,6 +151,7 @@ class Actions(
     val clearCache: () -> Unit,
     val measureCache: () -> Unit,
     val saveKeys: (Keys) -> Unit,
+    val northUp: () -> Unit,
 )
 
 private class LastSel { var sel: Sel? = null }
@@ -175,61 +184,77 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             )
         }
 
-        Reticle(Modifier.align(Alignment.Center))
+        CompassRose(state.view?.getOrNull(3) ?: 0.0, Modifier.align(Alignment.Center))
 
-        // Bottom left: where the screen centre is, and the credits the map providers require.
+        // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
         Column(
             Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                 .padding(start = 14.dp, end = 80.dp, bottom = 6.dp),
         ) {
-            state.view?.let { v -> Text(position(v), color = Palette.text.copy(alpha = 0.85f), fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
-            Text(state.credits.joinToString("  ·  "), color = Palette.dim.copy(alpha = 0.7f), fontSize = 9.sp, maxLines = 2)
+            state.view?.let { v ->
+                ScaleBar(v)
+                Text(position(v), color = Color.White, style = Figures.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium))
+            }
+            Text(state.credits.joinToString(", "), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, maxLines = 2)
         }
 
-        // Top left: the heads-up display. Compact; tap it for the details.
-        Hud(
+        Legend(
             state, actions,
             Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(start = 12.dp, top = 12.dp, end = 72.dp)
-                .widthIn(max = 400.dp),
+                .padding(start = 12.dp, top = 12.dp, end = 76.dp)
+                .widthIn(max = 380.dp),
         )
 
-        // Right: the controls.
+        // Right: one tool strip.
         Column(
             Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(12.dp)
+                .background(Palette.panel, RoundedCornerShape(14.dp))
+                .border(1.dp, Palette.line, RoundedCornerShape(14.dp)),
         ) {
-            RoundButton(Icons.Default.Menu, "Layers", active = state.layersOpen) {
+            Tool(Icons.Default.Menu, "Layers and settings", state.layersOpen) {
                 state.layersOpen = !state.layersOpen
                 state.search.open = false
                 if (state.layersOpen) actions.measureCache()
             }
-            RoundButton(Icons.Default.Search, "Search", active = state.search.open) {
+            ToolDivider()
+            Tool(Icons.Default.Search, "Search", state.search.open) {
                 state.search.open = !state.search.open
                 state.layersOpen = false
             }
+            ToolDivider()
             val busy = state.quakes.loading || state.events.loading || state.sats.loading ||
                 (state.flights.loading && state.flights.updatedAt == null)
             if (busy) {
-                Box(
-                    Modifier.size(44.dp).background(Palette.panel, CircleShape).border(1.dp, Palette.line, CircleShape),
-                    Alignment.Center,
-                ) {
-                    CircularProgressIndicator(Modifier.size(20.dp), color = Palette.accent, strokeWidth = 2.dp)
+                Box(Modifier.size(48.dp), Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Palette.magenta, strokeWidth = 2.dp)
                 }
             } else {
-                RoundButton(Icons.Default.Refresh, "Refresh", onClick = actions.refresh)
+                Tool(Icons.Default.Refresh, "Refresh", false, onClick = actions.refresh)
             }
-            RoundButton(Icons.Default.LocationOn, "Where I am", tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
-            RoundButton(Icons.Default.Star, "Sky view", onClick = actions.sky)
-            RoundButton(Icons.Default.Home, "Whole Earth", onClick = actions.home)
+            ToolDivider()
+            Tool(Icons.Default.LocationOn, "Where I am", false, tint = if (state.me != null) Palette.me else Palette.text, onClick = actions.myLocation)
+            ToolDivider()
+            Tool(Icons.Default.Star, "Sky view", false, onClick = actions.sky)
+            ToolDivider()
+            Tool(Icons.Default.Home, "Whole Earth", false, onClick = actions.home)
+            val heading = state.view?.getOrNull(3) ?: 0.0
+            if (heading > 0.5 && heading < 359.5) {
+                ToolDivider()
+                // North up: the arrow points where north is now.
+                Box(
+                    Modifier.size(48.dp).clickable(onClick = actions.northUp),
+                    Alignment.Center,
+                ) {
+                    Text("N", color = Palette.magenta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.rotate(-heading.toFloat()))
+                }
+            }
         }
 
         AnimatedVisibility(
@@ -380,11 +405,15 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
     }
 }
 
-/** Compact: name, live clock, one chip per layer. Tap for the full status and every error. */
+/**
+ * A chart legend: the real symbols from the globe with their counts. Tap it for every
+ * layer's detail and every problem.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Hud(state: EyeState, actions: Actions, modifier: Modifier) {
+private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
-    val errors = listOfNotNull(
+    val problems = listOfNotNull(
         state.quakes.error, state.flights.error, state.sats.error, state.events.error, state.radar.error,
         state.cameras.error, state.webcams.error, state.fires.error, state.meProblem, state.alertProblem,
         state.shipsProblem, state.globeError,
@@ -393,43 +422,39 @@ private fun Hud(state: EyeState, actions: Actions, modifier: Modifier) {
     Column(
         modifier
             .background(Palette.panel, shape)
-            .border(1.dp, (if (errors > 0) Palette.error else Palette.accent).copy(alpha = 0.35f), shape)
+            .border(1.dp, if (problems > 0) Palette.error else Palette.line, shape)
             .clickable { open = !open }
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
             .animateContentSize(),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LiveDot()
-            Spacer(Modifier.width(7.dp))
-            Text("SONDEREYE", color = Palette.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp, fontFamily = FontFamily.Monospace)
-            Spacer(Modifier.weight(1f))
-            Text(utc(state.clock), color = Palette.dim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        val l = state.layers
+        fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes")
+            if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights")
+            if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites")
+            if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships")
+            if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events")
+            if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires")
+            if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras")
+            if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams")
+            if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
         }
-        Row(
-            Modifier.padding(top = 7.dp).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val l = state.layers
-            fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
-            if (l.quakes) Chip(Palette.shallow, n(state.quakes), "QUAKES")
-            if (l.flights) Chip(Palette.flight, n(state.flights), "FLIGHTS")
-            if (l.satellites || state.extraSats.isNotEmpty()) Chip(Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "SATS")
-            if (l.ships) Chip(Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "SHIPS")
-            if (l.events) Chip(Palette.event("wildfires"), n(state.events), "EVENTS")
-            if (l.fires) Chip(Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "FIRES")
-            if (l.cameras) Chip(Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "CAMS")
-            if (l.webcams) Chip(Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "WEBCAMS")
-            if (l.radar) Chip(Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "RADAR")
-            val g = state.globeStatus
-            if (g != null && g.loading > 0 && g.failures == 0) Chip(Palette.dim, "↓${g.loading}", "TILES")
-            if (errors > 0) Chip(Palette.error, "⚠ $errors", if (errors == 1) "ALERT" else "ALERTS")
+        val g = state.globeStatus
+        if (g != null && g.loading > 0 && g.failures == 0) {
+            Text("Loading ${g.loading} map tiles", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        }
+        if (problems > 0 && !open) {
+            Text(
+                if (problems == 1) "1 problem. Tap for details." else "$problems problems. Tap for details.",
+                color = Palette.error, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp),
+            )
         }
         state.following?.let { hex ->
             val f = state.flights.items.firstOrNull { it.hex == hex }
             Text(
-                "◎ FOLLOWING ${f?.callsign ?: hex.uppercase()} · TAP TO STOP",
-                color = Palette.accent, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                "Following ${f?.callsign ?: hex.uppercase()}. Tap here to stop.",
+                color = Palette.magenta, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 6.dp).clickable { actions.follow(null) },
             )
         }
@@ -440,67 +465,174 @@ private fun Hud(state: EyeState, actions: Actions, modifier: Modifier) {
     }
 }
 
+/** One legend entry: symbol, count, name. */
 @Composable
-private fun Chip(color: Color, value: String, label: String) {
-    Row(
-        Modifier
-            .background(color.copy(alpha = 0.12f), RoundedCornerShape(50))
-            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(50))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(6.dp).background(color, CircleShape))
+private fun Key(sym: Sym, color: Color, value: String, name: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Symbol(sym, color, 14.dp)
         Spacer(Modifier.width(5.dp))
-        Text(value, color = Palette.text, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-        Spacer(Modifier.width(4.dp))
-        Text(label, color = Palette.dim, fontSize = 10.sp, letterSpacing = 1.sp, fontFamily = FontFamily.Monospace)
+        Text(value, color = Palette.text, style = Figures.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
+        Spacer(Modifier.width(3.dp))
+        Text(name, color = Palette.dim, fontSize = 14.sp)
     }
 }
 
-/** The red "live" light, breathing. */
+/** The shapes the globe draws, so the legend and cards match the map. */
+enum class Sym { DOT, PLANE, DIAMOND, RAIN, YOU }
+
 @Composable
-private fun LiveDot() {
-    val t = rememberInfiniteTransition(label = "live")
-    val a by t.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "live-alpha")
-    Box(Modifier.size(8.dp).background(Palette.error.copy(alpha = a), CircleShape))
+fun Symbol(sym: Sym, color: Color, size: androidx.compose.ui.unit.Dp) {
+    Canvas(Modifier.size(size)) { drawSymbol(sym, color) }
 }
 
-/** Thin crosshair on the screen centre: what the position readout refers to. */
+private fun DrawScope.drawSymbol(sym: Sym, color: Color) {
+    val w = size.width
+    val c = Offset(w / 2, size.height / 2)
+    val ink = Color(0xFF15171B)
+    when (sym) {
+        Sym.DOT -> {
+            drawCircle(ink, w * 0.42f, c)
+            drawCircle(color, w * 0.34f, c)
+        }
+        Sym.PLANE -> {
+            val p = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, w * 0.05f); lineTo(w * 0.86f, w * 0.92f); lineTo(w * 0.5f, w * 0.68f); lineTo(w * 0.14f, w * 0.92f); close()
+            }
+            drawPath(p, color)
+            drawPath(p, ink, style = Stroke(1.2f))
+        }
+        Sym.DIAMOND -> {
+            val p = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, 0f); lineTo(w, w * 0.5f); lineTo(w * 0.5f, w); lineTo(0f, w * 0.5f); close()
+            }
+            drawPath(p, ink)
+            val q = androidx.compose.ui.graphics.Path().apply {
+                moveTo(w * 0.5f, w * 0.16f); lineTo(w * 0.84f, w * 0.5f); lineTo(w * 0.5f, w * 0.84f); lineTo(w * 0.16f, w * 0.5f); close()
+            }
+            drawPath(q, color)
+        }
+        Sym.RAIN -> for (i in 0..2) {
+            val x = w * (0.25f + i * 0.25f)
+            drawLine(color, Offset(x, w * 0.2f), Offset(x - w * 0.12f, w * 0.8f), w * 0.12f)
+        }
+        Sym.YOU -> {
+            drawCircle(color.copy(alpha = 0.25f), w * 0.5f, c)
+            drawCircle(Color.White, w * 0.3f, c)
+            drawCircle(color, w * 0.21f, c)
+        }
+    }
+}
+
+/**
+ * VOR-style compass rose around the screen centre: ticks every 10°, numbers every 30°,
+ * magenta north. It turns with the map, so it always tells where north is.
+ */
 @Composable
-private fun Reticle(modifier: Modifier) {
-    Canvas(modifier.size(34.dp)) {
+private fun CompassRose(heading: Double, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val numStyle = TextStyle(fontFamily = Barlow, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.85f))
+    val northStyle = numStyle.copy(color = Palette.magenta, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    Canvas(modifier.size(168.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        val col = Color.White.copy(alpha = 0.55f)
-        val w = 1.2.dp.toPx()
-        val gap = 5.dp.toPx()
-        val arm = size.width / 2
-        drawLine(col, Offset(c.x - arm, c.y), Offset(c.x - gap, c.y), w)
-        drawLine(col, Offset(c.x + gap, c.y), Offset(c.x + arm, c.y), w)
-        drawLine(col, Offset(c.x, c.y - arm), Offset(c.x, c.y - gap), w)
-        drawLine(col, Offset(c.x, c.y + gap), Offset(c.x, c.y + arm), w)
-        drawCircle(col, radius = 1.6.dp.toPx(), center = c)
-        drawCircle(col.copy(alpha = 0.25f), radius = arm - 1f, center = c, style = Stroke(w))
+        val r = size.width / 2 - 14.dp.toPx()
+        val shadow = Color.Black.copy(alpha = 0.35f)
+        val tick = Color.White.copy(alpha = 0.6f)
+        rotate(-heading.toFloat(), c) {
+            for (deg in 0 until 360 step 10) {
+                val major = deg % 30 == 0
+                val len = (if (major) 9 else 5).dp.toPx()
+                val a = Math.toRadians(deg.toDouble())
+                val sx = kotlin.math.sin(a).toFloat(); val cy = -kotlin.math.cos(a).toFloat()
+                val o = Offset(c.x + sx * r, c.y + cy * r)
+                val i = Offset(c.x + sx * (r - len), c.y + cy * (r - len))
+                val col = if (deg == 0) Palette.magenta else tick
+                drawLine(shadow, o, i, 3f)
+                drawLine(col, o, i, if (major) 2f else 1.2f)
+                if (major) {
+                    val label = if (deg == 0) "N" else (deg / 10).toString()
+                    val layout = measurer.measure(label, if (deg == 0) northStyle else numStyle)
+                    val lr = r + 8.dp.toPx()
+                    val p = Offset(c.x + sx * lr - layout.size.width / 2f, c.y + cy * lr - layout.size.height / 2f)
+                    rotate(deg.toFloat(), Offset(p.x + layout.size.width / 2f, p.y + layout.size.height / 2f)) {
+                        drawText(layout, topLeft = p)
+                    }
+                }
+            }
+        }
+        // Centre mark: what the position readout refers to.
+        drawCircle(shadow, 4.dp.toPx(), c, style = Stroke(3f))
+        drawCircle(Color.White.copy(alpha = 0.8f), 4.dp.toPx(), c, style = Stroke(1.5f))
     }
 }
 
-private fun utc(ms: Long): String {
-    val s = (ms / 1000) % 86_400
-    return "%02d:%02d:%02d UTC".format(s / 3600, (s / 60) % 60, s % 60)
+/** A chart scale bar for the ground at the screen centre: a round length, in km or m. */
+@Composable
+private fun ScaleBar(v: DoubleArray) {
+    val mPerPx = v.getOrNull(4) ?: return
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val mPerDp = mPerPx * density
+    if (v[2] > 3_000_000 || mPerDp <= 0) return // from far out the ground curves away: no single scale
+    var len = 1.0
+    val target = mPerDp * 110 // about 110 dp long
+    while (len * 10 <= target) len *= 10
+    len = when {
+        len * 5 <= target -> len * 5
+        len * 2 <= target -> len * 2
+        else -> len
+    }
+    val widthDp = (len / mPerDp).toFloat()
+    val label = if (len >= 1000) "${(len / 1000).let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }} km" else "${len.toInt()} m"
+    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(bottom = 3.dp)) {
+        Canvas(Modifier.width(widthDp.dp).height(8.dp)) {
+            val h = size.height
+            val half = size.width / 2
+            // Alternating black and white halves, as on a printed chart.
+            drawRect(Color.Black, Offset(0f, h * 0.35f), androidx.compose.ui.geometry.Size(half, h * 0.65f))
+            drawRect(Color.White, Offset(half, h * 0.35f), androidx.compose.ui.geometry.Size(half, h * 0.65f))
+            drawRect(Color.White, Offset.Zero, size, style = Stroke(1.5f))
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Color.White, style = Figures.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium))
+    }
 }
 
-/** "35.7672°N 5.7997°W · ALT 25.0 km · HDG 000°" */
+@Composable
+private fun Tool(icon: ImageVector, label: String, active: Boolean, tint: Color = Palette.text, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .background(if (active) Palette.magenta.copy(alpha = 0.12f) else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = if (active) Palette.magenta else tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun ToolDivider() {
+    Box(Modifier.width(48.dp).height(1.dp).padding(horizontal = 10.dp).background(Palette.line))
+}
+
+/** Chart style: 35°47′32″N  5°49′37″W, then the height. */
 private fun position(v: DoubleArray): String {
-    val lat = "%.4f°%s".format(Locale.ROOT, kotlin.math.abs(v[0]), if (v[0] >= 0) "N" else "S")
-    val lon = "%.4f°%s".format(Locale.ROOT, kotlin.math.abs(v[1]), if (v[1] >= 0) "E" else "W")
+    fun dms(d: Double, pos: Char, neg: Char): String {
+        val a = kotlin.math.abs(d)
+        val deg = a.toInt()
+        val minF = (a - deg) * 60
+        val min = minF.toInt()
+        val sec = ((minF - min) * 60).roundToInt().coerceAtMost(59)
+        return "$deg°%02d′%02d″%s".format(Locale.ROOT, min, sec, if (d >= 0) pos else neg)
+    }
     val alt = v[2].let { if (it < 10_000) "%.0f m".format(Locale.ROOT, it) else if (it < 1_000_000) "%.1f km".format(Locale.ROOT, it / 1000) else "%,d km".format(Locale.ROOT, (it / 1000).toLong()) }
-    val hdg = "%03d°".format(Locale.ROOT, v.getOrElse(3) { 0.0 }.roundToInt() % 360)
-    return "$lat  $lon  ·  ALT $alt  ·  HDG $hdg"
+    return "${dms(v[0], 'N', 'S')}   ${dms(v[1], 'E', 'W')}   $alt up"
 }
 
 @Composable
 private fun LayerLine(dot: Color, title: String, detail: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(dot, CircleShape))
+        // Outlined: some layer colours (white aircraft) would vanish on chart paper.
+        Box(Modifier.size(9.dp).background(dot, CircleShape).border(1.dp, Palette.text, CircleShape))
         Spacer(Modifier.width(8.dp))
         Text(
             buildAnnotatedString {
@@ -518,19 +650,6 @@ private fun ErrorLine(text: String, onClick: (() -> Unit)?) {
         text, color = Palette.error, fontSize = 13.sp,
         modifier = Modifier.padding(top = 2.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     )
-}
-
-@Composable
-private fun RoundButton(icon: ImageVector, label: String, tint: Color = Palette.text, active: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .size(44.dp)
-            .background(if (active) Palette.accent.copy(alpha = 0.22f) else Palette.panel, CircleShape)
-            .border(1.dp, if (active) Palette.accent else Palette.line, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        IconButton(onClick = onClick) { Icon(icon, contentDescription = label, tint = tint) }
-    }
 }
 
 // ---- Cards ---------------------------------------------------------------------------------
@@ -562,14 +681,16 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
 }
 
 @Composable
-private fun Header(big: String?, bigColor: Color, title: String, sub: String, onClose: () -> Unit) {
+private fun Header(big: String?, bigColor: Color, title: String, sub: String, onClose: () -> Unit, sym: Sym? = null) {
     Row(verticalAlignment = Alignment.Top) {
         if (big != null) {
-            Text(big, color = bigColor, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text(big, color = Palette.text, style = Figures.copy(fontSize = 34.sp, fontWeight = FontWeight.SemiBold))
             Spacer(Modifier.width(14.dp))
+        } else if (sym != null) {
+            Box(Modifier.padding(top = 4.dp, end = 10.dp)) { Symbol(sym, bigColor, 18.dp) }
         }
         Column(Modifier.weight(1f).padding(top = 2.dp)) {
-            Text(title, color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (sub.isNotEmpty()) Text(sub, color = Palette.dim, fontSize = 13.sp)
         }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close", tint = Palette.dim) }
@@ -600,7 +721,7 @@ private fun ColumnScope.QuakeBody(q: Quake, now: Long, context: Context, onClose
 
 @Composable
 private fun ColumnScope.ShipBody(sh: Ship, now: Long, context: Context, onClose: () -> Unit) {
-    Header(null, Palette.ship, sh.name ?: "MMSI ${sh.mmsi}", "MMSI ${sh.mmsi}", onClose)
+    Header(null, Palette.ship, sh.name ?: "MMSI ${sh.mmsi}", "MMSI ${sh.mmsi}", onClose, Sym.PLANE)
     val parts = listOfNotNull(
         sh.sogKt?.let { "%.1f kn".format(it) },
         sh.cog?.let { "course ${it.roundToInt()}°" },
@@ -614,7 +735,7 @@ private fun ColumnScope.ShipBody(sh: Ship, now: Long, context: Context, onClose:
 
 @Composable
 private fun ColumnScope.WebcamBody(w: Webcam, context: Context, onClose: () -> Unit) {
-    Header(null, Palette.webcam, w.title, w.place ?: "", onClose)
+    Header(null, Palette.webcam, w.title, w.place ?: "", onClose, Sym.DIAMOND)
     var img by remember(w.id) { mutableStateOf<ImageBitmap?>(null) }
     var failed by remember(w.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(w.id) {
@@ -647,7 +768,7 @@ private fun ColumnScope.WebcamBody(w: Webcam, context: Context, onClose: () -> U
 @Composable
 private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Unit) {
     val conf = when (h.confidence) { "h" -> "high confidence"; "n" -> "nominal confidence"; "l" -> "low confidence"; else -> null }
-    Header(null, Palette.fire, "Fire detected by satellite", listOfNotNull(conf, if (h.day) "daytime pass" else "night pass").joinToString(", "), onClose)
+    Header(null, Palette.fire, "Fire detected by satellite", listOfNotNull(conf, if (h.day) "daytime pass" else "night pass").joinToString(", "), onClose, Sym.DOT)
     Line(listOfNotNull(h.frpMw?.let { "intensity %.1f MW".format(it) }, "seen ${h.acquired} UTC").joinToString(", "))
     LinkRow("NASA FIRMS, VIIRS NOAA-20", "Open FIRMS map") {
         openUrl(context, "https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@%.4f,%.4f,11.0z".format(java.util.Locale.ROOT, h.lon, h.lat))
@@ -667,7 +788,7 @@ private fun ColumnScope.CameraBody(c: Camera, context: Context, onClose: () -> U
 @Composable
 private fun ColumnScope.FlightBody(f: Flight, state: EyeState, actions: Actions, context: Context, onClose: () -> Unit) {
     val sub = listOfNotNull(f.type, f.registration).joinToString(", ").ifEmpty { "ICAO ${f.hex.uppercase()}" }
-    Header(null, Palette.text, f.callsign ?: f.hex.uppercase(), sub, onClose)
+    Header(null, Palette.text, f.callsign ?: f.hex.uppercase(), sub, onClose, Sym.PLANE)
     val alt = when {
         f.onGround -> "On the ground"
         f.altFt != null -> "%,d ft".format(f.altFt)
@@ -691,7 +812,7 @@ private fun ColumnScope.SatBody(s: Sgp4, state: EyeState, actions: Actions, onCl
     val p = s.ecefAt(t)
     val alt = p?.let { ((it.len() - EARTH_R) / 1000).roundToInt() }
     val speed = s.speedAt(t)
-    Header(null, Palette.satellite, s.tle.name, "NORAD ${s.tle.norad}, one orbit every ${s.tle.periodMin.roundToInt()} min", onClose)
+    Header(null, Palette.satellite, s.tle.name, "NORAD ${s.tle.norad}, one orbit every ${s.tle.periodMin.roundToInt()} min", onClose, Sym.DIAMOND)
     Line(if (alt == null) "Decayed: the orbit data puts it below the surface" else "$alt km up, ${"%.2f".format(speed ?: 0.0)} km/s")
     if (s.deepSpace) Line("High orbit: position approximate, within about 50 km")
     val me = state.me
@@ -725,14 +846,14 @@ private fun ColumnScope.EventBody(e: NatEvent, now: Long, context: Context, onCl
         append(e.categoryTitle)
         e.timeMs?.let { append(", ${Fmt.ago(it, now)}") }
     }
-    Header(null, Palette.event(e.category), e.title, sub, onClose)
+    Header(null, Palette.event(e.category), e.title, sub, onClose, Sym.DOT)
     LinkRow("From NASA EONET", if (e.url != null) "Open source" else null) { e.url?.let { openUrl(context, it) } }
 }
 
 @Composable
 private fun ColumnScope.MeBody(state: EyeState, now: Long, onClose: () -> Unit) {
     val me = state.me
-    Header(null, Palette.me, "You are here", if (me == null) "" else "%.4f, %.4f".format(me.latitude, me.longitude), onClose)
+    Header(null, Palette.me, "You are here", if (me == null) "" else "%.4f, %.4f".format(me.latitude, me.longitude), onClose, Sym.YOU)
     if (me != null) {
         val acc = if (me.hasAccuracy()) "within ${me.accuracy.roundToInt()} m" else "accuracy unknown"
         Line("$acc, ${Fmt.ago(me.time, now).lowercase()}")
@@ -743,7 +864,7 @@ private fun ColumnScope.MeBody(state: EyeState, now: Long, onClose: () -> Unit) 
 
 @Composable
 private fun ColumnScope.PlaceBody(p: Sel.OfPlace, state: EyeState, onClose: () -> Unit) {
-    Header(null, Palette.accent, "Weather here", "%.4f, %.4f".format(p.lat, p.lon), onClose)
+    Header(null, Palette.magenta, "Weather here", "%.4f, %.4f".format(p.lat, p.lon), onClose, Sym.DOT)
     WeatherLines(state)
     Spacer(Modifier.size(8.dp))
 }
@@ -906,19 +1027,26 @@ private fun LayersPanel(s: Layers, change: (Layers) -> Unit, cacheBytes: Long?, 
             Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
 
             Divider()
-            Section("Ships", "Live AIS from AISStream; loads below 2,000 km", s.ships) { change(s.copy(ships = it)) }
-            KeyField("AISStream key", keys.ais, "aisstream.io → sign in with GitHub → API Keys") { saveKeys(keys.copy(ais = it)) }
+            Section("Ships", "Live positions from AISStream, below 2,000 km. Needs a key.", s.ships) { change(s.copy(ships = it)) }
 
             Divider()
-            Section("Webcams", "Windy Webcams near the centre; loads below 1,000 km", s.webcams) { change(s.copy(webcams = it)) }
-            KeyField("Windy key", keys.windy, "api.windy.com → Webcams API → free key") { saveKeys(keys.copy(windy = it)) }
+            Section("Webcams", "Windy webcams near the centre, below 1,000 km. Needs a key.", s.webcams) { change(s.copy(webcams = it)) }
 
             Divider()
-            Section("Fire hotspots", "Every fire seen by NASA satellites, last 24 h", s.fires) { change(s.copy(fires = it)) }
-            KeyField("FIRMS map key", keys.firms, "firms.modaps.eosdis.nasa.gov/api/map_key → your e-mail") { saveKeys(keys.copy(firms = it)) }
+            Section("Fire hotspots", "Every fire NASA satellites saw in the last 24 h. Needs a key.", s.fires) { change(s.copy(fires = it)) }
 
             Divider()
             Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
+
+            Divider()
+            Text("API keys", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Free, and kept on this phone only. Get a key opens the page where you sign up; paste the key here.",
+                color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp),
+            )
+            KeyField("AISStream", "Ships", keys.ais, "https://aisstream.io/apikeys") { saveKeys(keys.copy(ais = it)) }
+            KeyField("Windy Webcams", "Webcams", keys.windy, "https://api.windy.com/keys") { saveKeys(keys.copy(windy = it)) }
+            KeyField("NASA FIRMS", "Fire hotspots", keys.firms, "https://firms.modaps.eosdis.nasa.gov/api/map_key/") { saveKeys(keys.copy(firms = it)) }
 
             Divider()
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -946,28 +1074,42 @@ private fun Section(title: String, sub: String, on: Boolean, toggle: (Boolean) -
     }
 }
 
-/** A personal key: shown masked once saved, with how to get one. */
+/** One personal key: what it unlocks, whether it is set, where to get it, and a field to paste it. */
 @Composable
-private fun KeyField(label: String, saved: String, how: String, save: (String) -> Unit) {
-    var editing by remember { mutableStateOf(saved.isEmpty()) }
+private fun KeyField(service: String, unlocks: String, saved: String, getUrl: String, save: (String) -> Unit) {
+    val context = LocalContext.current
+    var editing by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
-    if (!editing) {
-        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("$label: ••••${saved.takeLast(4)}", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            TextButton(onClick = { editing = true; text = "" }) { Text("Change", color = Palette.accent) }
+    Column(Modifier.padding(top = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(service, color = Palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    if (saved.isEmpty()) "Not set. Needed for $unlocks." else "Saved, ending ${saved.takeLast(4)}. Used for $unlocks.",
+                    color = if (saved.isEmpty()) Palette.dim else Palette.text, fontSize = 13.sp,
+                )
+            }
+            TextButton(onClick = { openUrl(context, getUrl) }) { Text("Get a key", color = Palette.accent) }
         }
-        return
-    }
-    Text(how, color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = text, onValueChange = { text = it }, singleLine = true,
-            placeholder = { Text(label, color = Palette.dim) },
-            visualTransformation = PasswordVisualTransformation(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = { save(text.trim()); editing = text.isBlank() }, enabled = text.isNotBlank()) { Text("Save", color = Palette.accent) }
+        if (editing || saved.isEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = text, onValueChange = { text = it }, singleLine = true,
+                    placeholder = { Text("Paste the $service key", color = Palette.dim) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Palette.text, unfocusedTextColor = Palette.text),
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { save(text.trim()); text = ""; editing = false }, enabled = text.isNotBlank()) {
+                    Text("Save", color = Palette.accent)
+                }
+            }
+        } else {
+            Row {
+                TextButton(onClick = { editing = true }) { Text("Replace key", color = Palette.accent) }
+                TextButton(onClick = { save("") }) { Text("Remove", color = Palette.error) }
+            }
+        }
     }
 }
 

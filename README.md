@@ -74,3 +74,5 @@ Failed builds attach their output to the pre-release `ci-failure`.
 ## Licence
 
 GPL-3.0-only. See [LICENSE](LICENSE).
+
+Bundled typeface: Barlow Semi Condensed, SIL Open Font License 1.1 ([licenses/Barlow-OFL.txt](licenses/Barlow-OFL.txt)).

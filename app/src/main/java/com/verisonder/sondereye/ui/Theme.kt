@@ -1,25 +1,39 @@
 package com.verisonder.sondereye.ui
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.Typography
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.verisonder.sondereye.R
 
+/*
+ * Aeronautical chart: white chart paper and ink over the dark globe, sectional-chart
+ * magenta for what matters most, chart blue for what you can open. One typeface,
+ * Barlow Semi Condensed, from road-sign lettering.
+ */
 object Palette {
     val space = Color(0xFF03060A)
-    /** Overlays sit on imagery of any colour, so they are nearly opaque. */
-    val panel = Color(0xEB0B121A)
-    val line = Color(0xFF1F2B38)
-    val text = Color(0xFFE6EDF3)
-    val dim = Color(0xFF93A1AF)
-    val accent = Color(0xFF4FC3F7) // shared with the Verisonder family
-    val error = Color(0xFFFF7A70)
+    /** Chart paper. Slightly see-through so the globe is never fully blocked. */
+    val panel = Color(0xF5FBFBF8)
+    val line = Color(0xFFD9D7D0)
+    val text = Color(0xFF15171B)
+    val dim = Color(0xFF5E636A)
+    /** Sectional-chart magenta: north, the active tool, what needs attention. */
+    val magenta = Color(0xFFB0126B)
+    /** Chart blue: links and actions. */
+    val accent = Color(0xFF1D5BA6)
+    val error = Color(0xFFC62828)
 
-    // Same ramp as the markers on the globe (globe/index.html).
+    // Marker colours on the globe (dark background).
     val shallow = Color(0xFFFFB547)
     val mid = Color(0xFFFF5E57)
     val deep = Color(0xFFB06CFF)
-
     val flight = Color(0xFFF2F5F8)
     val satellite = Color(0xFF7CF0C8)
     val me = Color(0xFF3D8BFF)
@@ -46,18 +60,39 @@ object Palette {
     }
 }
 
+val Barlow = FontFamily(
+    Font(R.font.barlow_sc_regular, FontWeight.Normal),
+    Font(R.font.barlow_sc_medium, FontWeight.Medium),
+    Font(R.font.barlow_sc_semibold, FontWeight.SemiBold),
+    Font(R.font.barlow_sc_semibold, FontWeight.Bold),
+)
+
+/** Tabular figures, so coordinates and counts do not jiggle as they change. */
+val Figures = TextStyle(fontFamily = Barlow, fontFeatureSettings = "tnum")
+
 @Composable
 fun EyeTheme(content: @Composable () -> Unit) {
+    val base = TextStyle(fontFamily = Barlow)
     MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Palette.accent,
-            onPrimary = Palette.space,
-            background = Palette.space,
+        colorScheme = lightColorScheme(
+            primary = Palette.magenta,
+            onPrimary = Color.White,
+            secondary = Palette.accent,
+            background = Palette.panel,
             surface = Palette.panel,
             onSurface = Palette.text,
             onSurfaceVariant = Palette.dim,
             outline = Palette.line,
             error = Palette.error,
+        ),
+        typography = Typography(
+            bodyLarge = base.copy(fontSize = 16.sp, lineHeight = 22.sp),
+            bodyMedium = base.copy(fontSize = 14.sp, lineHeight = 19.sp),
+            bodySmall = base.copy(fontSize = 12.sp, lineHeight = 16.sp),
+            titleLarge = base.copy(fontSize = 22.sp, fontWeight = FontWeight.SemiBold),
+            titleMedium = base.copy(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+            labelLarge = base.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium),
+            labelMedium = base.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
         ),
         content = content,
     )

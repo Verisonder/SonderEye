@@ -116,8 +116,17 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
         requestRender()
     }
 
-    /** [lat, lon, alt, heading] of the point under the screen centre, the camera height and heading. */
-    fun center(): DoubleArray = cam.let { doubleArrayOf(it.lat, it.lon, it.alt, it.heading) }
+    /**
+     * [lat, lon, alt, heading, metres per screen pixel] at the screen centre: the camera
+     * target, its height and heading, and the ground scale for a scale bar.
+     */
+    fun center(): DoubleArray = cam.let {
+        val v = view()
+        doubleArrayOf(it.lat, it.lon, it.alt, it.heading, it.alt / v.focalPx)
+    }
+
+    /** Turns the map back to north up. */
+    fun northUp() = flyTo(cam.copy(heading = 0.0), ms = 500)
 
     fun home() = flyTo(CameraState.HOME)
 

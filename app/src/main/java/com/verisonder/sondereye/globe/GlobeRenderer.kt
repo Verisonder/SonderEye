@@ -207,6 +207,14 @@ class GlobeRenderer(
         val sun = Astro.sun(System.currentTimeMillis()).norm()
         GLES30.glUniform3f(uSun, sun.x.toFloat(), sun.y.toFloat(), sun.z.toFloat())
         GLES30.glUniform1f(uShade, if (shading) 1f else 0f)
+        // Night is for the planet view. Closer in, you came to see the place: the dark side
+        // lightens and the city lights (only country-scale sharp) fade out.
+        val alt = view.cam.alt
+        val zoomedOut = ((alt - 60_000.0) / (1_500_000.0 - 60_000.0)).coerceIn(0.0, 1.0)
+        val nightFloor = (0.75 - 0.59 * zoomedOut).toFloat() // 0.16 from space, 0.75 over a city
+        val lightsK = (((alt - 250_000.0) / (1_200_000.0 - 250_000.0)).coerceIn(0.0, 1.0)).toFloat()
+        val uFloor = GLES30.glGetUniformLocation(tileProg, "uFloor")
+        GLES30.glUniform1f(uFloor, nightFloor)
         GLES30.glUniform1f(uMode, 0f)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(tileProg, "uTex"), 0)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
@@ -214,7 +222,7 @@ class GlobeRenderer(
 
         val baseSrc = base
         // Night lights only make sense with the night side shaded.
-        val overlaySrcs = overlays.filter { !it.night || shading }
+        val overlaySrcs = overlays.filter { !it.night || (shading && lightsK > 0f) }
         // Base first, opaque; then each overlay over it on the same meshes.
         for ((pass, src) in (listOf(baseSrc) + overlaySrcs).withIndex()) {
             if (pass >= 1) {
@@ -224,8 +232,10 @@ class GlobeRenderer(
                 else GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 GLES30.glDepthMask(false)
             }
-            GLES30.glUniform1f(uAlpha, src.alpha)
+            GLES30.glUniform1f(uAlpha, if (src.night) src.alpha * lightsK else src.alpha)
             GLES30.glUniform1f(uMode, if (src.night) 1f else 0f)
+            // Only the picture itself goes dark at night; roads, names and radar stay readable.
+            GLES30.glUniform1f(uShade, if (shading && pass == 0) 1f else 0f)
             for (k in tiles) {
                 val want = SourcedTile(src, src.keyFor(k))
                 var found: SourcedTile? = null
@@ -282,6 +292,7 @@ class GlobeRenderer(
         GLES30.glDepthMask(true)
         GLES30.glUniform1f(uAlpha, 1f)
         GLES30.glUniform1f(uMode, 0f)
+        GLES30.glUniform1f(uShade, if (shading) 1f else 0f) // for the polar caps
 
         drawCaps(view, uMvp, uHasTex, uColor, uCenter)
         GLES30.glUniform1f(uShade, 0f) // lines keep their colour day and night
@@ -643,6 +654,7 @@ uniform float uAlpha;
 uniform vec3 uSun;    // unit vector toward the Sun, world frame
 uniform float uShade; // 1: darken the night side
 uniform float uMode;  // 1: night lights (brightness as opacity, night side only)
+uniform float uFloor; // how bright the night side stays (darker from space)
 in vec2 vUv;
 in vec3 vNormal;
 out vec4 outColor;
@@ -655,7 +667,7 @@ void main() {
         outColor = vec4(c.rgb * vec3(1.0, 0.92, 0.75), glow * (1.0 - day) * uAlpha);
         return;
     }
-    float light = mix(1.0, mix(0.16, 1.0, day), uShade);
+    float light = mix(1.0, mix(uFloor, 1.0, day), uShade);
     outColor = vec4(c.rgb * light, c.a * uAlpha);
 }"""
 
