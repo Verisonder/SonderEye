@@ -614,7 +614,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
             if (!p.weather) {
                 b.weather = null; b.forecast = null; b.weatherProblem = null
             } else if (here == null) {
-                b.weatherProblem = "Weather: your location is not known yet. Tap the pin once, then open this again."
+                b.weatherProblem = "Weather: your location is not known yet. Click the pin key once, or right-click your place on the map and set it."
             } else {
                 when (val w = withContext(Dispatchers.IO) { Feeds.forecast(here[0], here[1]) }) {
                     is Net.Outcome.Ok -> { b.weather = w.value.first; b.forecast = w.value.second; b.weatherProblem = null; b.weatherAt = System.currentTimeMillis() }
@@ -650,7 +650,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
                     is Net.Outcome.Ok -> stories.addAll(r.value)
                     is Net.Outcome.Failed -> problems.add(r.message)
                 }
-                if (News.sourcesFor(p).isEmpty()) problems.add("News: no sources chosen. Tap Customise.")
+                if (News.sourcesFor(p).isEmpty()) problems.add("News: no sources chosen. Click Customise.")
                 val fresh = News.today(News.filter(stories, p.include, p.exclude), System.currentTimeMillis(), p.stories)
                 b.newsProblems = problems
                 // Every feed failed (no connection): keep what we had rather than blank it.
