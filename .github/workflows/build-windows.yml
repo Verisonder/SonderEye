@@ -72,6 +72,26 @@ jobs:
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("screenshot.png")
           "running after 45 s: $(-not $p.HasExited)" | Out-File smoke.txt
+          # Memory: after start-up, then after two minutes of zooming in and out and dragging.
+          $p.Refresh(); "memory after start-up: $([math]::Round($p.PrivateMemorySize64 / 1MB)) MB" | Out-File -Append smoke.txt
+          Add-Type -TypeDefinition @"
+          using System; using System.Runtime.InteropServices;
+          public static class Mouse {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, int dx, int dy, int data, UIntPtr e);
+          }
+          "@
+          $cx = [int]($b.Width / 2); $cy = [int]($b.Height / 2)
+          for ($r = 0; $r -lt 12; $r++) {
+            [Mouse]::SetCursorPos($cx, $cy)
+            for ($i = 0; $i -lt 8; $i++) { [Mouse]::mouse_event(0x0800, 0, 0, 120, [UIntPtr]::Zero); Start-Sleep -Milliseconds 150 }
+            [Mouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+            for ($i = 0; $i -lt 10; $i++) { [Mouse]::SetCursorPos($cx - $i * 20, $cy - $i * 10); Start-Sleep -Milliseconds 50 }
+            [Mouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+            for ($i = 0; $i -lt 8; $i++) { [Mouse]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero); Start-Sleep -Milliseconds 150 }
+            Start-Sleep -Seconds 4
+          }
+          $p.Refresh(); "memory after two minutes of use: $([math]::Round($p.PrivateMemorySize64 / 1MB)) MB" | Out-File -Append smoke.txt
           $log = Join-Path $env:LOCALAPPDATA "SonderEye/files/crash.log"
           if (Test-Path $log) { Get-Content $log | Out-File -Append smoke.txt } else { "no crash log" | Out-File -Append smoke.txt }
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }

@@ -1,7 +1,10 @@
 package com.verisonder.sondereye.globe
 
 import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.FilterTileMode
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.SamplingMode
+import org.jetbrains.skia.Shader
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -47,6 +50,17 @@ class TileStore(
         private set
 
     fun get(t: SourcedTile): Image? = images[t]
+
+    /**
+     * The tile's shader, made once and kept with it. Made afresh every frame they piled up in
+     * native memory (Java's collector never saw them as large, so it did not hurry): gigabytes.
+     */
+    fun shader(t: SourcedTile): Shader? {
+        val img = images[t] ?: return null
+        return shaders.getOrPut(t) { img.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, SamplingMode.LINEAR, null) }
+    }
+
+    private val shaders = HashMap<SourcedTile, Shader>()
     fun has(t: SourcedTile) = images.containsKey(t)
     fun nextFrame() = frame.incrementAndGet()
 
@@ -103,7 +117,9 @@ class TileStore(
     private fun decode(bytes: ByteArray): Pair<Image, Boolean>? {
         val encoded = runCatching { Image.makeFromEncoded(bytes) }.getOrNull() ?: return null
         // Decoded here, on the worker, not on the UI thread at first draw.
-        val bmp = runCatching { Bitmap.makeFromImage(encoded) }.getOrNull() ?: return null
+        val bmp = runCatching { Bitmap.makeFromImage(encoded) }.getOrNull()
+        encoded.close() // the compressed copy is not needed once decoded
+        if (bmp == null) return null
         val px = bmp.readPixels()
         var empty = px != null
         if (px != null) {
@@ -114,7 +130,9 @@ class TileStore(
             }
         }
         bmp.setImmutable()
-        return Image.makeFromBitmap(bmp) to empty
+        val img = Image.makeFromBitmap(bmp) // shares the pixels, which outlive the Bitmap wrapper
+        bmp.close()
+        return img to empty
     }
 
     private fun bundled(t: SourcedTile): ByteArray? =
@@ -163,6 +181,7 @@ class TileStore(
             val e = it.next()
             if (e.key in used || e.key.key.z <= 3) continue
             e.value.close()
+            shaders.remove(e.key)?.close()
             it.remove()
         }
     }

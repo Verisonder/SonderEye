@@ -23,12 +23,14 @@ val appVersion = "1.0.0"
 compose.desktop {
     application {
         mainClass = "com.verisonder.sondereye.ui.MainKt"
-        jvmArgs += listOf("-Xmx1g", "-Dsun.java2d.uiScale.enabled=true")
+        // A modest Java heap: the tiles live in native memory, and the heap is only the app's data.
+        jvmArgs += listOf("-Xmx768m", "-XX:+UseG1GC", "-XX:MaxDirectMemorySize=256m", "-Dsun.java2d.uiScale.enabled=true")
         nativeDistributions {
             targetFormats(TargetFormat.Exe)
             packageName = "SonderEye"
             packageVersion = appVersion
-            description = "The planet's live traffic on a 3D globe"
+            // Windows shows this as the program's name (Task Manager, the taskbar): the name, then.
+            description = "SonderEye"
             vendor = "Verisonder"
             copyright = "GPL-3.0-only"
             licenseFile.set(rootProject.file("../LICENSE"))

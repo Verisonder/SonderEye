@@ -46,6 +46,8 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
     val painter = remember(g) { Painter(g) }
     val scope = rememberCoroutineScope()
     val mouse = remember { MouseState() }
+    // Drawing paths reused frame after frame: a new one each time is native memory Java is slow to give back.
+    val scratch = remember { Scratch() }
     Canvas(
         modifier
             .fillMaxSize()
@@ -122,10 +124,15 @@ fun GlobeCanvas(g: GlobeView, modifier: Modifier = Modifier) {
         if (g.hold) return@Canvas
         drawGlow(v)
         drawIntoCanvas { painter.draw(it.nativeCanvas, v, g.density) }
-        drawLines(v, g.lines)
+        drawLines(v, g.lines, scratch)
         g.highlight?.let { hl -> drawIntoCanvas { painter.drawRoads(it.nativeCanvas, v, g.density, hl) } }
-        drawMarkers(v, g.markers, g.selectedKey, g.density)
+        drawMarkers(v, g.markers, g.selectedKey, g.density, scratch)
     }
+}
+
+private class Scratch {
+    val a = Path()
+    val b = Path()
 }
 
 private class MouseState {
@@ -173,10 +180,11 @@ internal fun visible(v: View, p: V3): Boolean {
     return t < 0 || t > dist
 }
 
-private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>) {
+private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>, scratch: Scratch) {
     for (l in lines) {
         val color = Color(l.rgb).copy(alpha = l.alpha)
-        val path = Path()
+        val path = scratch.a
+        path.reset()
         var open = false
         var any = false
         if (l.pairs) {
@@ -208,7 +216,7 @@ private fun DrawScope.drawLines(v: View, lines: List<GlobeLine>) {
 private val DARK = Color(0xE6030A10)
 
 /** Markers face the screen: dots, arrows for aircraft, ships and buses, diamonds for satellites. */
-private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float) {
+private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?, density: Float, scratch: Scratch) {
     var sel: Pair<Offset, Float>? = null
     for (m in list) {
         if (!visible(v, m.pos)) continue
@@ -221,7 +229,8 @@ private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?
             Marker.SHAPE_PLANE -> {
                 val ang = screenBearing(v, m)
                 rotate(ang, pivot = c) {
-                    val body = Path().apply {
+                    val body = scratch.a.apply {
+                        reset()
                         moveTo(c.x, c.y - r * 0.9f)
                         lineTo(c.x + r * 0.62f, c.y + r * 0.6f)
                         lineTo(c.x, c.y + r * 0.2f)
@@ -233,11 +242,13 @@ private fun DrawScope.drawMarkers(v: View, list: List<Marker>, selected: String?
                 }
             }
             Marker.SHAPE_SAT -> {
-                val d = Path().apply {
+                val d = scratch.a.apply {
+                    reset()
                     moveTo(c.x, c.y - r); lineTo(c.x + r, c.y); lineTo(c.x, c.y + r); lineTo(c.x - r, c.y); close()
                 }
                 drawPath(d, DARK)
-                val d2 = Path().apply {
+                val d2 = scratch.b.apply {
+                    reset()
                     val q = r * 0.72f
                     moveTo(c.x, c.y - q); lineTo(c.x + q, c.y); lineTo(c.x, c.y + q); lineTo(c.x - q, c.y); close()
                 }

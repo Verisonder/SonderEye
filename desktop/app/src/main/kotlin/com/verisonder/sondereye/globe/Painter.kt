@@ -135,6 +135,7 @@ class Painter(private val g: GlobeView) {
                 }
                 used.add(found)
                 val img = g.tiles.get(found) ?: continue
+                val shader = g.tiles.shader(found) ?: continue
                 val uvt = k.uvIn(found.key)
                 val tex = Array(p.pos.size) { i ->
                     if (i * 2 + 1 >= p.uv.size) Point(0f, 0f)
@@ -143,7 +144,7 @@ class Painter(private val g: GlobeView) {
                         ((p.uv[i * 2 + 1] * uvt[0] + uvt[2]) * img.height).toFloat(),
                     )
                 }
-                texPaint.shader = img.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, SamplingMode.LINEAR, null)
+                texPaint.shader = shader
                 if (src.night) {
                     // City lights: the picture's brightness, added, on the dark side only.
                     val k2 = (src.alpha * lightsK).toFloat()
