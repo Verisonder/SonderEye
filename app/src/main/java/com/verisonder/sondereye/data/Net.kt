@@ -10,8 +10,11 @@ import java.net.UnknownHostException
 object Net {
     sealed class Outcome<out T> {
         class Ok<T>(val value: T) : Outcome<T>()
-        /** [message] is shown on screen as-is. */
-        class Failed(val message: String) : Outcome<Nothing>()
+        /**
+         * [message] is shown on screen as-is. [code] is the HTTP status (0 when there was
+         * none); [retryAfterS] is the server's own "try again in" when it sent one.
+         */
+        class Failed(val message: String, val code: Int = 0, val retryAfterS: Int? = null) : Outcome<Nothing>()
     }
 
     private const val TIMEOUT_MS = 15_000
@@ -60,7 +63,10 @@ object Net {
                 conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
             val code = conn.responseCode
-            if (code == 429) return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)")
+            if (code == 429) {
+                val wait = conn.getHeaderField("Retry-After")?.trim()?.toIntOrNull()
+                return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)", 429, wait)
+            }
             if ((code == 401 || code == 403) && hasKey(url, headers)) {
                 return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
             }

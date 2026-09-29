@@ -184,6 +184,8 @@ class EyeState {
     /** Live ships by MMSI; replaced (not mutated) so Compose sees changes. */
     var ships by mutableStateOf<Map<Long, Ship>>(emptyMap())
     var shipsNote by mutableStateOf<String?>(null)
+    /** Flights are rate-limited: shown quietly in the legend. */
+    var flightsNote by mutableStateOf<String?>(null)
     var shipsProblem by mutableStateOf<String?>(null)
     val webcams = Feed<Webcam>()
     var webcamsNote by mutableStateOf<String?>(null)
@@ -386,7 +388,9 @@ class MainActivity : ComponentActivity() {
                         val now = System.currentTimeMillis()
                         state.clock = now
                         if ((l.satellites && state.sats.items.isNotEmpty()) || state.extraSats.isNotEmpty()) updateSatellites(now, orbit = tick % 30 == 0L)
-                        if (l.flights && !state.flights.loading && now - state.flights.attemptAt >= FLIGHTS_MS) loadFlights()
+                        if (l.flights && !state.flights.loading &&
+                            now - state.flights.attemptAt >= maxOf(FLIGHTS_MS, flightsBackoffS * 1000L)
+                        ) loadFlights()
                         if (l.radar && !state.radar.loading && now - state.radar.attemptAt >= RADAR_MS) loadRadar()
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
@@ -701,6 +705,20 @@ class MainActivity : ComponentActivity() {
         run("flights") {
             val out = withContext(Dispatchers.IO) { Feeds.flights(c[0], c[1]) }
             val at = System.currentTimeMillis()
+            if (out is Net.Outcome.Failed && out.code == 429) {
+                // Rate-limited: wait longer each time (or as long as the server says), keep
+                // the planes we have gliding, and say so quietly rather than as an error.
+                flightsBackoffS = (out.retryAfterS ?: (flightsBackoffS * 2).coerceAtLeast(30)).coerceIn(15, 300)
+                flightsLimitedSince = if (flightsLimitedSince == 0L) at else flightsLimitedSince
+                state.flights.loading = false
+                state.flightsNote = "adsb.lol is busy, next update in ${flightsBackoffS} s"
+                state.flights.error = if (at - flightsLimitedSince > 15 * 60_000L)
+                    "Flights: adsb.lol has been refusing requests for 15 minutes (HTTP 429)" else null
+                return@run
+            }
+            flightsBackoffS = 0
+            flightsLimitedSince = 0L
+            state.flightsNote = null
             settle(state.flights, map(out) { it.flights to it.skipped }, "flights") { list ->
                 flightsAt = at
                 rememberTrail(list, at)
@@ -807,6 +825,9 @@ class MainActivity : ComponentActivity() {
     // ---- Flights: gliding, trails, follow ----------------------------------------------
 
     private var flightsAt = 0L
+    /** Seconds to wait after adsb.lol said "slow down" (0: not limited). */
+    private var flightsBackoffS = 0
+    private var flightsLimitedSince = 0L
     /** Recent positions per aircraft: lat, lon, altitude m, time. */
     private val trails = HashMap<String, ArrayDeque<DoubleArray>>()
 
@@ -1263,8 +1284,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val QUAKES_AUTO_MS = 5 * 60_000L
-        /** adsb.lol is a free community service: one area request every 10 s is plenty. */
-        private const val FLIGHTS_MS = 10_000L
+        /** adsb.lol is a free community service: one area request every 15 s (planes glide in between). */
+        private const val FLIGHTS_MS = 15_000L
         /** RainViewer publishes a frame every 10 minutes. */
         private const val RADAR_MS = 10 * 60_000L
         /** The last hour, looped. */

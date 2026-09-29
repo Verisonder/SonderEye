@@ -17,25 +17,30 @@ import androidx.compose.ui.unit.sp
 import com.verisonder.sondereye.R
 
 /*
- * Aeronautical chart, night edition by default: dark panels (or white chart paper, in
- * the menu), sectional-chart magenta for what matters most, chart blue for what you can
- * open. One typeface, Barlow Semi Condensed, from road-sign lettering.
+ * Radar scope: dark scope glass, phosphor-green signal, pale phosphor text, a green
+ * hairline edge. Green is what radar and air-traffic screens glow in, and this app is
+ * a scope on the planet's traffic. Links stay a quiet cyan; problems are warning red.
+ * One typeface, Barlow Semi Condensed.
  */
 object Palette {
-    /** Dark panels (default) or light chart paper; switched in the menu. */
+    /** Dark scope panels (default) or light ones; switched in the menu. */
     var dark by mutableStateOf(true)
 
     val space = Color(0xFF03060A)
     // Opaque: the globe must never show through text.
-    val panel get() = if (dark) Color(0xFF151A20) else Color(0xFFFBFBF8)
-    val line get() = if (dark) Color(0xFF2B323B) else Color(0xFFD9D7D0)
-    val text get() = if (dark) Color(0xFFE9E7E2) else Color(0xFF15171B)
-    val dim get() = if (dark) Color(0xFF9BA2AA) else Color(0xFF5E636A)
-    /** Sectional-chart magenta: north, the active tool, what needs attention. */
-    val magenta get() = if (dark) Color(0xFFE2489E) else Color(0xFFB0126B)
-    /** Chart blue: links and actions. */
-    val accent get() = if (dark) Color(0xFF79B2FF) else Color(0xFF1D5BA6)
-    val error get() = if (dark) Color(0xFFFF7A70) else Color(0xFFC62828)
+    val panel get() = if (dark) Color(0xFF06110B) else Color(0xFFF4FAF6)
+    val line get() = if (dark) Color(0xFF1C4630) else Color(0xFFC9DDD0)
+    val text get() = if (dark) Color(0xFFD4F7E0) else Color(0xFF0E1F15)
+    val dim get() = if (dark) Color(0xFF6FA887) else Color(0xFF4F6B5A)
+    /** Phosphor green: the sweep, north, the active key, what needs attention. */
+    val signal get() = if (dark) Color(0xFF5CF28E) else Color(0xFF0B7A3E)
+    /** Text on a solid signal background. */
+    val onSignal get() = if (dark) Color(0xFF03140A) else Color.White
+    /** Phosphor green drawn straight over the globe (scope, readout, scale bar): always bright. */
+    val scope = Color(0xFF7DF5A5)
+    /** Links and actions. */
+    val accent get() = if (dark) Color(0xFF8FD8FF) else Color(0xFF1D5BA6)
+    val error get() = if (dark) Color(0xFFFF6B57) else Color(0xFFC62828)
 
     // Marker colours on the globe (dark background).
     val shallow = Color(0xFFFFB547)
@@ -82,10 +87,10 @@ fun EyeTheme(content: @Composable () -> Unit) {
     val base = TextStyle(fontFamily = Barlow)
     MaterialTheme(
         colorScheme = if (Palette.dark) darkColorScheme(
-            primary = Palette.magenta,
-            onPrimary = Color.White,
-            primaryContainer = Palette.magenta.copy(alpha = 0.25f),
-            secondaryContainer = Palette.magenta.copy(alpha = 0.25f),
+            primary = Palette.signal,
+            onPrimary = Palette.onSignal,
+            primaryContainer = Palette.signal.copy(alpha = 0.25f),
+            secondaryContainer = Palette.signal.copy(alpha = 0.25f),
             onSecondaryContainer = Palette.text,
             secondary = Palette.accent,
             background = Palette.panel,
@@ -95,7 +100,7 @@ fun EyeTheme(content: @Composable () -> Unit) {
             outline = Palette.line,
             error = Palette.error,
         ) else lightColorScheme(
-            primary = Palette.magenta,
+            primary = Palette.signal,
             onPrimary = Color.White,
             secondary = Palette.accent,
             background = Palette.panel,

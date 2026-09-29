@@ -231,10 +231,10 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         ) {
             state.view?.let { v ->
                 ScaleBar(v)
-                Text(position(v), color = Color.White, style = Figures.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium))
+                Text(position(v), color = Palette.scope, style = Figures.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium))
             }
             if (state.credits.isNotEmpty()) {
-                Text(state.credits.joinToString(", "), color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp, maxLines = 2)
+                Text(state.credits.joinToString(", "), color = Palette.scope.copy(alpha = 0.55f), fontSize = 10.sp, maxLines = 2)
             }
         }
 
@@ -276,7 +276,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 Modifier
                     .size(48.dp)
                     .padding(6.dp)
-                    .background(if (locked) Palette.magenta else Color.Transparent, RoundedCornerShape(10.dp))
+                    .background(if (locked) Palette.signal else Color.Transparent, RoundedCornerShape(10.dp))
                     .pointerInput(locked) {
                         detectTapGestures(
                             onTap = { actions.northUp() },
@@ -293,7 +293,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             ) {
                 Text(
                     "N",
-                    color = if (locked) Color.White else Palette.magenta,
+                    color = if (locked) Palette.onSignal else Palette.signal,
                     fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.rotate(if (locked) 0f else -heading.toFloat()),
                 )
@@ -318,7 +318,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 (state.flights.loading && state.flights.updatedAt == null)
             if (busy) {
                 Box(Modifier.size(48.dp), Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(18.dp), color = Palette.magenta, strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Palette.signal, strokeWidth = 2.dp)
                 }
             } else {
                 Tool(Icons.Default.Refresh, "Refresh", false, onClick = actions.refresh)
@@ -535,6 +535,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         if (g != null && g.loading > 0 && g.failures == 0) {
             Text("Loading ${g.loading} map tiles", color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
         }
+        if (l.flights) state.flightsNote?.let { Text(it, color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
         if (problems > 0 && !open) {
             Text(
                 if (problems == 1) "1 problem. Tap for details." else "$problems problems. Tap for details.",
@@ -545,7 +546,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
             val f = state.flights.items.firstOrNull { it.hex == hex }
             Text(
                 "Following ${f?.callsign ?: hex.uppercase()}. Tap here to stop.",
-                color = Palette.magenta, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                color = Palette.signal, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 6.dp).clickable { actions.follow(null) },
             )
         }
@@ -615,19 +616,55 @@ private fun DrawScope.drawSymbol(sym: Sym, color: Color) {
 }
 
 /**
- * VOR-style compass rose around the screen centre: ticks every 10°, numbers every 30°,
- * magenta north. It turns with the map, so it always tells where north is.
+ * The radar scope around the screen centre: bearing ticks (north marked), range rings at
+ * real ground distances, labelled like the scale bar, and a slow sweep with a fading
+ * phosphor trail. The sweep is the interface's one moving element. It turns with the map.
  */
 @Composable
-private fun CompassRose(heading: Double, modifier: Modifier) {
+private fun RadarScope(view: DoubleArray?, modifier: Modifier) {
+    val heading = view?.getOrNull(3) ?: 0.0
     val measurer = rememberTextMeasurer()
-    val numStyle = TextStyle(fontFamily = Barlow, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.85f))
-    val northStyle = numStyle.copy(color = Palette.magenta, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    Canvas(modifier.size(168.dp)) {
+    val green = Palette.scope // over the globe: always bright, whichever panels are chosen
+    val numStyle = TextStyle(fontFamily = Barlow, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = green.copy(alpha = 0.85f))
+    val northStyle = numStyle.copy(color = green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    val ringStyle = numStyle.copy(fontSize = 10.sp, color = green.copy(alpha = 0.7f))
+    val sweep by rememberInfiniteTransition(label = "sweep").animateFloat(
+        0f, 360f, infiniteRepeatable(tween(4000, easing = androidx.compose.animation.core.LinearEasing)), label = "sweep-angle",
+    )
+    Canvas(modifier.size(210.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        val r = size.width / 2 - 14.dp.toPx()
+        val r = size.width / 2 - 16.dp.toPx()
         val shadow = Color.Black.copy(alpha = 0.35f)
-        val tick = Color.White.copy(alpha = 0.6f)
+
+        // Range rings at a round ground distance, when the ground has one scale (not from deep space).
+        val mPerPx = view?.getOrNull(4)
+        if (mPerPx != null && view[2] < 3_000_000) {
+            val outerM = mPerPx * r
+            var ring = 1.0
+            while (ring * 10 <= outerM) ring *= 10
+            ring = when { ring * 5 <= outerM -> ring * 5; ring * 2 <= outerM -> ring * 2; else -> ring }
+            for (k in listOf(0.5, 1.0)) {
+                val rr = (ring * k / mPerPx).toFloat()
+                if (rr < 12.dp.toPx() || rr > r) continue
+                drawCircle(shadow, rr, c, style = Stroke(3f))
+                drawCircle(green.copy(alpha = 0.35f), rr, c, style = Stroke(1.2f))
+                val m = ring * k
+                val label = if (m >= 1000) "${(m / 1000).let { if (it % 1.0 == 0.0) it.toInt().toString() else "%.1f".format(Locale.ROOT, it) }} km" else "${m.toInt()} m"
+                val layout = measurer.measure(label, ringStyle)
+                drawText(layout, topLeft = Offset(c.x + rr * 0.72f + 3f, c.y - rr * 0.72f - layout.size.height))
+            }
+        }
+        drawCircle(shadow, r, c, style = Stroke(3f))
+        drawCircle(green.copy(alpha = 0.45f), r, c, style = Stroke(1.2f))
+
+        // The sweep: a bright line and a trail that fades over 40 degrees behind it.
+        for (i in 0 until 40) {
+            val a = Math.toRadians((sweep - i).toDouble())
+            val end = Offset(c.x + kotlin.math.sin(a).toFloat() * r, c.y - kotlin.math.cos(a).toFloat() * r)
+            val alpha = if (i == 0) 0.75f else 0.16f * (1f - i / 40f)
+            drawLine(green.copy(alpha = alpha), c, end, if (i == 0) 2f else 3.2f)
+        }
+
         rotate(-heading.toFloat(), c) {
             for (deg in 0 until 360 step 10) {
                 val major = deg % 30 == 0
@@ -636,13 +673,12 @@ private fun CompassRose(heading: Double, modifier: Modifier) {
                 val sx = kotlin.math.sin(a).toFloat(); val cy = -kotlin.math.cos(a).toFloat()
                 val o = Offset(c.x + sx * r, c.y + cy * r)
                 val i = Offset(c.x + sx * (r - len), c.y + cy * (r - len))
-                val col = if (deg == 0) Palette.magenta else tick
                 drawLine(shadow, o, i, 3f)
-                drawLine(col, o, i, if (major) 2f else 1.2f)
+                drawLine(green.copy(alpha = if (deg == 0) 1f else 0.7f), o, i, if (major) 2f else 1.2f)
                 if (major) {
                     val label = if (deg == 0) "N" else (deg / 10).toString()
                     val layout = measurer.measure(label, if (deg == 0) northStyle else numStyle)
-                    val lr = r + 8.dp.toPx()
+                    val lr = r + 9.dp.toPx()
                     val p = Offset(c.x + sx * lr - layout.size.width / 2f, c.y + cy * lr - layout.size.height / 2f)
                     rotate(deg.toFloat(), Offset(p.x + layout.size.width / 2f, p.y + layout.size.height / 2f)) {
                         drawText(layout, topLeft = p)
@@ -650,9 +686,10 @@ private fun CompassRose(heading: Double, modifier: Modifier) {
                 }
             }
         }
-        // Centre mark: what the position readout refers to.
-        drawCircle(shadow, 4.dp.toPx(), c, style = Stroke(3f))
-        drawCircle(Color.White.copy(alpha = 0.8f), 4.dp.toPx(), c, style = Stroke(1.5f))
+        // Centre: what the position readout refers to.
+        val arm = 5.dp.toPx()
+        drawLine(green.copy(alpha = 0.9f), Offset(c.x - arm, c.y), Offset(c.x + arm, c.y), 1.5f)
+        drawLine(green.copy(alpha = 0.9f), Offset(c.x, c.y - arm), Offset(c.x, c.y + arm), 1.5f)
     }
 }
 
@@ -679,11 +716,11 @@ private fun ScaleBar(v: DoubleArray) {
             val half = size.width / 2
             // Alternating black and white halves, as on a printed chart.
             drawRect(Color.Black, Offset(0f, h * 0.35f), androidx.compose.ui.geometry.Size(half, h * 0.65f))
-            drawRect(Color.White, Offset(half, h * 0.35f), androidx.compose.ui.geometry.Size(half, h * 0.65f))
-            drawRect(Color.White, Offset.Zero, size, style = Stroke(1.5f))
+            drawRect(Palette.scope, Offset(half, h * 0.35f), androidx.compose.ui.geometry.Size(half, h * 0.65f))
+            drawRect(Palette.scope, Offset.Zero, size, style = Stroke(1.5f))
         }
         Spacer(Modifier.width(6.dp))
-        Text(label, color = Color.White, style = Figures.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium))
+        Text(label, color = Palette.scope, style = Figures.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium))
     }
 }
 
@@ -724,7 +761,7 @@ private fun Tool(
     Box(
         Modifier
             .size(48.dp)
-            .background(if (active) Palette.magenta.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (active) Palette.signal.copy(alpha = 0.12f) else Color.Transparent)
             .pointerInput(label) {
                 detectTapGestures(
                     onTap = { tap() },
@@ -741,7 +778,7 @@ private fun Tool(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = label, tint = if (active) Palette.magenta else tint, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = label, tint = if (active) Palette.signal else tint, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -1000,7 +1037,7 @@ private fun ColumnScope.MeBody(state: EyeState, now: Long, onClose: () -> Unit) 
 
 @Composable
 private fun ColumnScope.PlaceBody(p: Sel.OfPlace, state: EyeState, onClose: () -> Unit) {
-    Header(null, Palette.magenta, "Weather here", "%.4f, %.4f".format(p.lat, p.lon), onClose, Sym.DOT)
+    Header(null, Palette.signal, "Weather here", "%.4f, %.4f".format(p.lat, p.lon), onClose, Sym.DOT)
     WeatherLines(state)
     Spacer(Modifier.size(8.dp))
 }
@@ -1130,7 +1167,7 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
                         color = Palette.dim, fontSize = 12.sp, modifier = Modifier.weight(1f),
                     )
                     if (b.writing) {
-                        CircularProgressIndicator(Modifier.size(16.dp), color = Palette.magenta, strokeWidth = 2.dp)
+                        CircularProgressIndicator(Modifier.size(16.dp), color = Palette.signal, strokeWidth = 2.dp)
                     } else if (b.stories.isNotEmpty()) {
                         TextButton(onClick = actions.regenerateSummary) { Text(if (summary == null) "Write summary" else "Regenerate", color = Palette.accent) }
                     }
@@ -1329,7 +1366,7 @@ private fun LayersPanel(
             Toggle("Loop the past hour", s.radarLoop, s.radar) { change(s.copy(radarLoop = it)) }
 
             Divider()
-            Section("Flights", "adsb.lol, near the screen centre, every 10 s", s.flights) { change(s.copy(flights = it)) }
+            Section("Flights", "adsb.lol, near the screen centre, every 15 s", s.flights) { change(s.copy(flights = it)) }
             Toggle("Trails (last 30 min)", s.trails, s.flights) { change(s.copy(trails = it)) }
 
             Divider()
