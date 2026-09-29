@@ -604,10 +604,12 @@ class GlobeRenderer(
     companion object {
         const val MAX_ZOOM = 20
         /**
-         * A tile splits when it would cover more than this many screen pixels. 448 keeps
-         * imagery sharp on a ~450 dpi screen while needing about a third fewer tiles than 384.
+         * A tile splits when it would cover more than this many screen pixels, so 256 px
+         * tiles show at 256–512 physical px: still sharper than a web map on a ~450 dpi
+         * phone (which shows them at ~700). Measured on a 1220×2712 screen at 800 m up:
+         * 18 tiles instead of 72 at 384 px — the main cost of close-up views.
          */
-        private const val SPLIT_PX = 448.0
+        private const val SPLIT_PX = 512.0
         private const val TILE_LIMIT = 180
         private const val TEXTURE_CAP = 300 // up to ~70 MB of GPU memory, which phones share with RAM
         private const val MESH_CAP = 400
