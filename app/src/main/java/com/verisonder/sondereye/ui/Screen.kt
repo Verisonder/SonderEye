@@ -651,7 +651,8 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         }
         // Bottom edge: opens the details above it, and closes them again.
         Box(
-            Modifier.fillMaxWidth().padding(top = 2.dp).height(22.dp).offset(y = 6.dp).clickable { open = !open },
+            // A fixed width, centred: filling the width stretched the whole legend to its limit.
+            Modifier.align(Alignment.CenterHorizontally).padding(top = 2.dp).size(width = 72.dp, height = 22.dp).offset(y = 6.dp).clickable { open = !open },
             Alignment.Center,
         ) {
             Icon(
