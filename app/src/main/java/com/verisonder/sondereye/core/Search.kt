@@ -12,6 +12,23 @@ data class Place(val name: String, val detail: String, val lat: Double, val lon:
 object Nominatim {
     fun url(q: String) = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=" + URLEncoder.encode(q.trim(), "UTF-8")
 
+    /** The town at a point: its name, for saying where the weather is. */
+    fun reverseUrl(lat: Double, lon: Double) =
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=en&lat=%.5f&lon=%.5f"
+            .format(java.util.Locale.ROOT, lat, lon)
+
+    /** "Tangier, Morocco": the town (or nearest thing to one) and the country. */
+    fun parseTown(text: String): String {
+        val m = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
+        (m["error"] as? String)?.let { throw Json.ParseError(it) }
+        val a = m["address"] as? Map<*, *> ?: emptyMap<String, Any>()
+        val town = listOf("city", "town", "village", "municipality", "county", "state")
+            .firstNotNullOfOrNull { (a[it] as? String)?.takeIf { s -> s.isNotBlank() } }
+            ?: (m["name"] as? String)?.takeIf { it.isNotBlank() }
+        val country = a["country"] as? String
+        return listOfNotNull(town, country).distinct().joinToString(", ").ifEmpty { throw Json.ParseError("No place here") }
+    }
+
     fun parse(text: String): List<Place> {
         val list = Json.parse(text) as? List<*> ?: throw Json.ParseError("Not a list")
         return list.mapNotNull { e ->

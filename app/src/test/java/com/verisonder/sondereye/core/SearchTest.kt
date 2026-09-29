@@ -58,4 +58,13 @@ class SearchTest {
         val n = Motion.ahead(35.0, -5.0, 0.0, 60.0, 3600.0) // 60 nm north = 1° of latitude
         assertEquals(36.0, n[0], 0.01)
     }
+
+    @Test fun townFromReverseLookup() {
+        val t = """{"name":"Tanger","address":{"city":"Tangier","state":"Tanger-Tetouan-Al Hoceima","country":"Morocco"}}"""
+        assertEquals("Tangier, Morocco", Nominatim.parseTown(t))
+        assertEquals("Ksar Sghir, Morocco", Nominatim.parseTown("""{"address":{"village":"Ksar Sghir","country":"Morocco"}}"""))
+        try { Nominatim.parseTown("""{"error":"Unable to geocode"}"""); throw AssertionError() } catch (e: Json.ParseError) {
+            assertEquals("Unable to geocode", e.message)
+        }
+    }
 }

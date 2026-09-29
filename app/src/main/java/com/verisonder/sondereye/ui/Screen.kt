@@ -217,29 +217,30 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         val hidden = state.chromeHidden
-        if (!hidden) RadarScope(state.view, Modifier.align(Alignment.Center))
+        RadarScope(state.view, Modifier.align(Alignment.Center))
 
         // An open panel takes the space; the legend and readout step aside rather than show under it.
         // In the clean view everything steps aside.
-        val panelOpen = state.layersOpen || state.search.open || state.brief.open || state.listLayer != null || hidden
+        val panelOpen = state.layersOpen || state.search.open || state.brief.open || state.listLayer != null
         // A selected thing's card sits where the readout is; sideways the screen is too short
         // for the card and the legend both, so the legend steps aside until the card closes.
         val cardOpen = state.selected != null
         val sideways = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
         if (hidden) {
-            // The only control left: a small tab on the right edge that brings everything back.
+            // The tool strip tucked away: a small tab on the right edge brings it back.
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(top = 12.dp)
                     .size(width = 30.dp, height = 56.dp)
-                    .background(Palette.panel.copy(alpha = 0.75f), RoundedCornerShape(2.dp))
+                    .background(Palette.panel)
+                    .border(1.dp, Palette.line)
                     .clickable { state.chromeHidden = false },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Show the controls", tint = Palette.text)
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Show the tool strip", tint = Palette.signal)
             }
         }
 
@@ -298,10 +299,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .border(1.dp, Palette.line, RoundedCornerShape(2.dp))
                 .verticalScroll(rememberScrollState()),
         ) {
-            Tool(Icons.Default.KeyboardArrowRight, "Hide the controls (the tab on the right brings them back)", false) {
-                state.layersOpen = false
-                state.search.open = false
-                state.brief.open = false
+            Tool(Icons.Default.KeyboardArrowRight, "Hide this strip (the tab on the right brings it back)", false) {
                 state.chromeHidden = true
             }
             ToolDivider()
@@ -364,7 +362,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             ToolDivider()
             Tool(
                 Icons.Default.LocationOn, "Where I am", false,
-                tint = if (state.me != null) Palette.me else Palette.text,
+                tint = if (state.me != null) Palette.signal else Palette.text,
                 onLongPress = actions.myLocationClose, // street level
                 onClick = actions.myLocation,
             )
@@ -1481,8 +1479,15 @@ private fun BriefPanel(state: EyeState, actions: Actions) {
             }
             if (b.editing) BriefSettings(b.prefs, actions.briefPrefs)
 
-            // Weather where you are.
+            // Weather where you are, and where that is.
             val w = b.weather
+            if (w != null && b.place != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Palette.signal, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(b.place!!, color = Palette.signal, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+            }
             when {
                 w != null -> {
                     val d = b.forecast?.days?.firstOrNull()

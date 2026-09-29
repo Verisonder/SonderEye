@@ -46,6 +46,8 @@ object Feeds {
 
     fun places(q: String) = Net.get(Nominatim.url(q), "Search", "OpenStreetMap", Nominatim::parse)
 
+    fun town(lat: Double, lon: Double) = Net.get(Nominatim.reverseUrl(lat, lon), "Place name", "OpenStreetMap", Nominatim::parseTown)
+
     fun callsign(cs: String) = Net.get(Lookup.callsignUrl(cs), "Search", "adsb.lol", Adsb::parse)
 
     fun satellitesNamed(q: String) = Net.get(Lookup.satelliteUrl(q), "Search", "CelesTrak") { Tle.parseAll(it) }

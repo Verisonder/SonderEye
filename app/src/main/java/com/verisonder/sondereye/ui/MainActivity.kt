@@ -127,6 +127,8 @@ class BriefState {
     var weather by mutableStateOf<Weather?>(null)
     var forecast by mutableStateOf<Forecast?>(null)
     var weatherProblem by mutableStateOf<String?>(null)
+    /** Where the weather is for ("Tangier, Morocco"). */
+    var place by mutableStateOf<String?>(null)
     var stories by mutableStateOf<List<Story>>(emptyList())
     var newsProblems by mutableStateOf<List<String>>(emptyList())
     var summary by mutableStateOf<String?>(null)
@@ -597,6 +599,9 @@ class MainActivity : ComponentActivity() {
                     is Net.Outcome.Ok -> { b.weather = w.value.first; b.forecast = w.value.second; b.weatherProblem = null; b.weatherAt = System.currentTimeMillis() }
                     is Net.Outcome.Failed -> b.weatherProblem = w.message
                 }
+                // The town's name; without it the panel still says where by coordinates.
+                b.place = (withContext(Dispatchers.IO) { Feeds.town(here[0], here[1]) } as? Net.Outcome.Ok)?.value
+                    ?: "%.3f, %.3f".format(java.util.Locale.ROOT, here[0], here[1])
             }
         }
     }
@@ -640,7 +645,7 @@ class MainActivity : ComponentActivity() {
                     val d = b.forecast?.days?.firstOrNull()
                     "${w.tempC.roundToInt()} °C now, ${w.description.lowercase()}" + (d?.let { ", high ${it.maxC.roundToInt()} °C, low ${it.minC.roundToInt()} °C" } ?: "")
                 }
-                when (val out = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, null, p) }) {
+                when (val out = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, b.place, p) }) {
                     is Net.Outcome.Ok -> b.summary = out.value
                     is Net.Outcome.Failed -> b.summaryProblem = out.message // the previous summary stays
                 }
