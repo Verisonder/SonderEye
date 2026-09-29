@@ -18,10 +18,15 @@ object Net {
     }
 
     private const val TIMEOUT_MS = 15_000
+    private const val SLOW_TIMEOUT_MS = 45_000
 
     /** A form POST (Overpass wants its query in the body). */
     fun <T> post(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
         request(url, what, source, body, emptyMap(), text(parse))
+
+    /** A form POST for a query that can take the server a while (bus routes with their shapes). */
+    fun <T> postSlow(url: String, body: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
+        request(url, what, source, body, emptyMap(), text(parse), SLOW_TIMEOUT_MS)
 
     /** A JSON POST (Gemini). */
     fun <T> postJson(url: String, json: String, what: String, source: String, parse: (String) -> T): Outcome<T> =
@@ -47,6 +52,7 @@ object Net {
 
     private fun <T> request(
         url: String, what: String, source: String, body: String?, headers: Map<String, String>, parse: (ByteArray) -> T,
+        timeoutMs: Int = TIMEOUT_MS,
     ): Outcome<T> {
         val conn = try {
             URL(url).openConnection() as HttpURLConnection
@@ -55,7 +61,7 @@ object Net {
         }
         return try {
             conn.connectTimeout = TIMEOUT_MS
-            conn.readTimeout = TIMEOUT_MS
+            conn.readTimeout = timeoutMs
             conn.setRequestProperty("Accept", "application/json, text/plain, */*")
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
             for ((k, v) in headers) conn.setRequestProperty(k, v)

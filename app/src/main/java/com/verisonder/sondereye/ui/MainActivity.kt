@@ -448,7 +448,7 @@ class MainActivity : ComponentActivity() {
                         if (l.flights && state.flights.items.isNotEmpty()) glideFlights(now)
                         if (l.cameras && !state.cameras.loading && now - state.cameras.attemptAt >= 15_000 && camerasStale()) loadCameras()
                         if (l.busLines) {
-                            if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busArea.stale(globe?.center())) loadBusLines()
+                            if (!state.busLines.loading && now - state.busLines.attemptAt >= 15_000 && busLinesStale()) loadBusLines()
                             showBusStops()
                         }
                         if (l.conflicts && !state.conflicts.loading && now - state.conflicts.attemptAt >= CONFLICTS_MS) loadConflicts()
@@ -1054,6 +1054,18 @@ class MainActivity : ComponentActivity() {
                 is Net.Outcome.Failed -> state.busLines.error = out.message
             }
         }
+    }
+
+    /**
+     * The box loaded still covers the view: zooming in within it needs nothing new (the
+     * routes are already there), unlike the other layers, which follow the view's size.
+     */
+    private fun busLinesStale(): Boolean {
+        val c = globe?.center() ?: return false
+        val last = busArea.centre ?: return true
+        val moved = Geo.toDeg(Geo.angle(Geo.ecef(c[0], c[1]), Geo.ecef(last[0], last[1]))) * 111_000
+        val want = (c[2] * 1.6).coerceIn(3_000.0, 25_000.0)
+        return moved > last[2] * 0.5 || want > last[2] * 1.25
     }
 
     /** The routes on the globe; the selected one bright, the rest quieter while one is selected. */

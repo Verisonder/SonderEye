@@ -40,7 +40,7 @@ object BusLines {
     fun query(s: Double, w: Double, n: Double, e: Double): String {
         val box = "%.5f,%.5f,%.5f,%.5f".format(Locale.ROOT, s, w, n, e)
         return "data=" + URLEncoder.encode(
-            "[out:json][timeout:25];" +
+            "[out:json][timeout:40];" +
                 "relation[\"type\"=\"route\"][\"route\"~\"^(bus|trolleybus)$\"]($box)->.r;" +
                 ".r out geom($box);" +
                 "node(r.r)($box);out;",
