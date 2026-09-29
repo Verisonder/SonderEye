@@ -233,6 +233,10 @@ class EyeState {
     var ride by mutableStateOf<com.verisonder.sondereye.core.Ride.Progress?>(null)
     /** Speed from the last position fix, m/s (for the time to the next stop). */
     var rideSpeed by mutableStateOf<Float?>(null)
+    /** Gemini's account of conflict places, by pin; the one being written; the last failure. */
+    var explained by mutableStateOf<Map<String, String>>(emptyMap())
+    var explaining by mutableStateOf<String?>(null)
+    var explainProblem by mutableStateOf<Pair<String, String>?>(null)
     /** The start-up sequence is on screen. */
     var booting by mutableStateOf(false)
     /** Live buses, and what the legend says about where they come from. */
@@ -360,6 +364,7 @@ class MainActivity : ComponentActivity() {
                         zoomHold = { rate -> globe?.zoomHold(rate) },
                         revealGlobe = { globe?.reveal() },
                         ride = ::ride,
+                        explain = ::explain,
                         myLocation = { myLocation() },
                         myLocationClose = { myLocation(ME_CLOSE_ALT) },
                         fixLocation = ::fixLocation,
@@ -1324,6 +1329,27 @@ class MainActivity : ComponentActivity() {
             if (all.isEmpty()) null else all[all.size / 2]
         }
         else -> null
+    }
+
+    // ---- Explaining a conflict place -------------------------------------------------------
+
+    /** Asks Gemini (the user's own key) what happened at [c], from its stories. */
+    private fun explain(c: Conflict) {
+        val key = state.keys.gemini
+        if (key.isEmpty()) {
+            state.explainProblem = c.key to "Add your Gemini key in the menu (API keys) to explain this."
+            return
+        }
+        state.explaining = c.key
+        state.explainProblem = null
+        run("explain") {
+            val out = withContext(Dispatchers.IO) { Feeds.explain(key, c.name, c.articles, state.brief.prefs.language) }
+            state.explaining = null
+            when (out) {
+                is Net.Outcome.Ok -> state.explained = state.explained + (c.key to out.value)
+                is Net.Outcome.Failed -> state.explainProblem = c.key to out.message
+            }
+        }
     }
 
     // ---- Riding a bus ---------------------------------------------------------------------

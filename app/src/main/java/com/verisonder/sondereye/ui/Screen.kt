@@ -161,6 +161,8 @@ class Actions(
     val change: (Layers) -> Unit,
     val select: (Sel?) -> Unit,
     val home: () -> Unit,
+    /** Ask Gemini what happened at a conflict place, from its stories. */
+    val explain: (Conflict) -> Unit,
     /** Start riding a bus line (the map follows you along it), or stop (null). */
     val ride: (BusLine?) -> Unit,
     /** The start-up screen is about to fade: let the globe be drawn. */
@@ -418,40 +420,43 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
         }
 
-        if (state.brief.open) {
-            Box(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp, end = 76.dp, start = 12.dp)
-                    .widthIn(max = 460.dp)
-            ) {
-                BriefPanel(state, actions)
-            }
+        // The panels drop down from the top and fold back up, rather than popping in and out.
+        val dropIn = expandVertically(expandFrom = Alignment.Top) + fadeIn()
+        val foldUp = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+        AnimatedVisibility(
+            visible = state.brief.open,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = 12.dp, end = 76.dp, start = 12.dp)
+                .widthIn(max = 460.dp),
+            enter = dropIn, exit = foldUp,
+        ) {
+            BriefPanel(state, actions)
         }
 
-        if (state.search.open) {
-            Box(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp, end = 72.dp, start = 12.dp)
-                .widthIn(max = 420.dp)
-            ) {
-                SearchPanel(state.search, actions)
-            }
+        AnimatedVisibility(
+            visible = state.search.open,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = 12.dp, end = 72.dp, start = 12.dp)
+                .widthIn(max = 420.dp),
+            enter = dropIn, exit = foldUp,
+        ) {
+            SearchPanel(state.search, actions)
         }
 
-        if (state.layersOpen) {
-            Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { state.layersOpen = false } })
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(top = 12.dp, end = 72.dp, start = 12.dp)
-            ) {
-                LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys, state.allCredits)
-            }
+        if (state.layersOpen) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { state.layersOpen = false } })
+        AnimatedVisibility(
+            visible = state.layersOpen,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = 12.dp, end = 72.dp, start = 12.dp),
+            enter = dropIn, exit = foldUp,
+        ) {
+            LayersPanel(state.layers, actions.change, state.cacheBytes, actions.clearCache, state.keys, actions.saveKeys, state.allCredits)
         }
 
         // Over everything, only when the app has just been opened.
@@ -1052,7 +1057,7 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfShip -> ShipBody(state.ships[sel.s.mmsi] ?: sel.s, now, context, close)
                 is Sel.OfWebcam -> WebcamBody(sel.w, context, close)
                 is Sel.OfFire -> FireBody(sel.h, context, close)
-                is Sel.OfConflict -> ConflictBody(sel.c, context, close)
+                is Sel.OfConflict -> ConflictBody(sel.c, state, actions, context, close)
                 is Sel.OfBusStop -> BusStopBody(sel.s, state, actions, close)
                 is Sel.OfBusLine -> BusLineBody(sel.l, state, actions, context, close)
                 is Sel.OfBus -> BusBody(sel.b, state, close)
@@ -1161,10 +1166,21 @@ private fun ColumnScope.FireBody(h: Hotspot, context: Context, onClose: () -> Un
 }
 
 @Composable
-private fun ColumnScope.ConflictBody(c: Conflict, context: Context, onClose: () -> Unit) {
+private fun ColumnScope.ConflictBody(c: Conflict, state: EyeState, actions: Actions, context: Context, onClose: () -> Unit) {
     Header(null, Palette.conflict, c.name, if (c.count == 1) "1 article about fighting" else "${c.count} articles about fighting", onClose, Sym.DOT)
-    // The stories themselves: what the pin is based on.
-    for (a in c.articles.take(5)) {
+    // What happened, in a few sentences, when asked for.
+    val told = state.explained[c.key]
+    when {
+        state.explaining == c.key -> Line("Reading the stories…", Palette.signal)
+        told != null -> {
+            Text(told, color = Palette.text, fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp, end = 10.dp))
+            Line("Written by Gemini from these stories.")
+        }
+        else -> FoButton("Explain") { actions.explain(c) }
+    }
+    state.explainProblem?.takeIf { it.first == c.key }?.let { Line(it.second, Palette.error) }
+    // The stories themselves: what the pin is based on (fewer once explained, to keep the card short).
+    for (a in c.articles.take(if (told != null) 3 else 5)) {
         Row(
             Modifier.fillMaxWidth().clickable { openUrl(context, a.url) }.padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,

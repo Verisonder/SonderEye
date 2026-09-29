@@ -195,6 +195,24 @@ object Gemini {
             "\"generationConfig\":{\"temperature\":0.3,\"maxOutputTokens\":2048$thinking}}"
     }
 
+    /**
+     * What happened at a place in the news for fighting, from its stories. With [readLinks],
+     * Gemini may open the links (its URL-context tool) rather than go by the titles alone.
+     */
+    fun explainRequest(place: String, articles: List<Article>, language: String, model: String = MODELS[0], readLinks: Boolean = true): String {
+        val list = articles.take(10).joinToString("\n") { "- ${it.title}: ${it.url}" }
+        val prompt = buildString {
+            append("In 3 to 5 short sentences, in $language, explain what happened in or near $place according to these news stories. ")
+            append("Say who was involved, what happened and when, as the stories report it. ")
+            append("If the stories disagree, or say little, say so plainly. Do not guess or add anything they do not say. No title.")
+            append("\n\nStories:\n").append(list)
+        }
+        val tools = if (readLinks) ",\"tools\":[{\"url_context\":{}}]" else ""
+        val thinking = if (model.startsWith("gemini-2.5")) ",\"thinkingConfig\":{\"thinkingBudget\":0}" else ""
+        return "{\"contents\":[{\"parts\":[{\"text\":" + Json.str(prompt) + "}]}]$tools," +
+            "\"generationConfig\":{\"temperature\":0.2,\"maxOutputTokens\":1024$thinking}}"
+    }
+
     fun parse(text: String): String {
         val root = Json.parse(text) as? Map<*, *> ?: throw Json.ParseError("Not a JSON object")
         (root["error"] as? Map<*, *>)?.let { throw Json.ParseError((it["message"] as? String) ?: "Gemini error") }

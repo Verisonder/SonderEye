@@ -96,4 +96,12 @@ class NewsTest {
             assertEquals("API key not valid", e.message)
         }
     }
+
+    @Test fun explainRequest() {
+        val a = listOf(Article("Army shells market (news.example)", "https://news.example/a"))
+        val body = Gemini.explainRequest("Khartoum, Sudan", a, "French")
+        assertTrue(body.contains("\"url_context\"") && body.contains("Khartoum, Sudan") && body.contains("https://news.example/a") && body.contains("in French"))
+        assertTrue(!Gemini.explainRequest("X", a, "English", readLinks = false).contains("tools"))
+        assertTrue(Json.parse(body) is Map<*, *>) // well-formed
+    }
 }

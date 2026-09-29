@@ -80,13 +80,13 @@ object Net {
                 return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)", 429, wait)
             }
             if ((code == 401 || code == 403) && hasKey(url, headers)) {
-                return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
+                return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu", code)
             }
-            if (code == 403) return Outcome.Failed("$what: $source blocked the request (HTTP 403). It may block apps; turn it off in Today, Customise")
+            if (code == 403) return Outcome.Failed("$what: $source blocked the request (HTTP 403). It may block apps; turn it off in Today, Customise", 403)
             if (code != 200) {
                 val detail = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
                     ?.let { Regex("\"message\"\\s*:\\s*\"([^\"]{1,160})").find(it)?.groupValues?.get(1) }
-                return Outcome.Failed("$what: $source answered HTTP $code" + (detail?.let { " ($it)" } ?: ""))
+                return Outcome.Failed("$what: $source answered HTTP $code" + (detail?.let { " ($it)" } ?: ""), code)
             }
             val bytes = conn.inputStream.use { it.readBytes() }
             try {

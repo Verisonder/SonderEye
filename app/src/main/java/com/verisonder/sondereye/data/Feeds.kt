@@ -76,6 +76,23 @@ object Feeds {
         return last
     }
 
+    /**
+     * Gemini's account of a conflict place from its stories: reading the links where it
+     * can, from the titles alone where the model refuses the tool (HTTP 400).
+     */
+    fun explain(key: String, place: String, articles: List<com.verisonder.sondereye.core.Article>, language: String): Net.Outcome<String> {
+        var last: Net.Outcome<String> = Net.Outcome.Failed("Explain: no Gemini model answered")
+        for (m in Gemini.MODELS) {
+            for (links in listOf(true, false)) {
+                last = Net.postJson(Gemini.url(m, key), Gemini.explainRequest(place, articles, language, m, links), "Explain", "Gemini", Gemini::parse)
+                if (last is Net.Outcome.Ok) return last
+                if ((last as Net.Outcome.Failed).code != 400) break
+            }
+            if ("HTTP 404" !in (last as Net.Outcome.Failed).message) return last
+        }
+        return last
+    }
+
     fun webcams(key: String, lat: Double, lon: Double, radiusKm: Int) =
         Net.getWith(Windy.url(lat, lon, radiusKm), mapOf("x-windy-api-key" to key.trim()), "Webcams", "Windy", Windy::parse)
 
