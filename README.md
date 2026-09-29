@@ -68,7 +68,8 @@ not a web page in a wrapper.
 | News | Publisher RSS/Atom feeds (12 built in, or your own) | None |
 | Written brief | [Google Gemini API](https://aistudio.google.com/apikey), optional | Free tier |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
-| Conflicts | [GDELT](https://www.gdeltproject.org) GEO 2.0, armed-conflict theme, last 24 h | None |
+| Conflicts | [GDELT](https://www.gdeltproject.org) 15-minute event files: assaults, clashes, mass violence, up to 24 h | None |
+| Street-level roads | [OpenFreeMap](https://openfreemap.org) vector tiles (OpenMapTiles, from OpenStreetMap) | None |
 | Bus lines and stops | OpenStreetMap via the Overpass API | None |
 | Live buses | Operators' GTFS Realtime feeds, found and relayed by [Transitland](https://www.transit.land) | Free |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
