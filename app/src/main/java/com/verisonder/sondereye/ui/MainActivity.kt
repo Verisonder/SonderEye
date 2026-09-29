@@ -351,6 +351,7 @@ class MainActivity : ComponentActivity() {
                             globe?.home()
                         },
                         zoomHold = { rate -> globe?.zoomHold(rate) },
+                        revealGlobe = { globe?.reveal() },
                         myLocation = { myLocation() },
                         myLocationClose = { myLocation(ME_CLOSE_ALT) },
                         fixLocation = ::fixLocation,

@@ -156,12 +156,21 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
      */
     fun intro(delayMs: Long, flyMs: Long) {
         val target = cam
+        // Nothing on screen until the start-up screen lets it through ([reveal]): no flash of the map first.
+        renderer.hold = true
         setCam(target.copy(lon = target.lon + 130.0, lat = target.lat - 15.0, alt = CameraState.MAX_ALT))
         introPending = true
         postDelayed({ if (introPending && animation == null) flyTo(target, flyMs); introPending = false }, delayMs)
     }
 
     private var introPending = false
+
+    /** Lets the globe be drawn again after [intro]. */
+    fun reveal() {
+        if (!renderer.hold) return
+        renderer.hold = false
+        requestRender()
+    }
 
     /**
      * Zooms toward the centre without stopping, [rate] in e-folds of height per second

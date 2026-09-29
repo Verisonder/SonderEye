@@ -160,6 +160,8 @@ class Actions(
     val change: (Layers) -> Unit,
     val select: (Sel?) -> Unit,
     val home: () -> Unit,
+    /** The start-up screen is about to fade: let the globe be drawn. */
+    val revealGlobe: () -> Unit,
     /** Hold on the Earth key: zoom at this rate (above 0 in, below 0 out); 0 stops. */
     val zoomHold: (Double) -> Unit,
     val myLocation: () -> Unit,
@@ -221,7 +223,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         val hidden = state.chromeHidden
-        RadarScope(state.view, Modifier.align(Alignment.Center))
+        if (!state.booting) RadarScope(state.view, Modifier.align(Alignment.Center))
 
         // An open panel takes the space; the legend and readout step aside rather than show under it.
         // In the clean view everything steps aside.
@@ -232,7 +234,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         val sideways = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
         // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
-        if (!panelOpen && !cardOpen) Column(
+        if (!panelOpen && !cardOpen && !state.booting) Column(
             Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
@@ -248,7 +250,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         AnimatedVisibility(
-            visible = !panelOpen && state.legendHidden,
+            visible = !panelOpen && state.legendHidden && !state.booting,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
@@ -271,7 +273,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
         // The legend slides off to the left edge and back, rather than blinking out.
         AnimatedVisibility(
-            visible = !panelOpen && !state.legendHidden && !(cardOpen && sideways),
+            visible = !panelOpen && !state.legendHidden && !(cardOpen && sideways) && !state.booting,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
@@ -284,9 +286,15 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
 
         // Right: one tool strip. Sideways the screen is shorter than the strip, so it scrolls.
         val stripMax = (LocalConfiguration.current.screenHeightDp - 40).coerceAtLeast(120)
+        // Held back during the start-up screen, then slides in from the right edge.
+        AnimatedVisibility(
+            visible = !state.booting,
+            modifier = Modifier.align(Alignment.TopEnd),
+            enter = slideInHorizontally { it } + fadeIn(),
+            exit = fadeOut(),
+        ) {
         Column(
             Modifier
-                .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(12.dp)
                 .heightIn(max = stripMax.dp)
@@ -377,6 +385,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
             }
         }
+        }
 
         AnimatedVisibility(
             visible = state.selected != null,
@@ -443,7 +452,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
 
         // Over everything, only when the app has just been opened.
-        if (state.booting) BootSequence { state.booting = false }
+        if (state.booting) BootSequence(onReveal = actions.revealGlobe) { state.booting = false }
     }
 }
 

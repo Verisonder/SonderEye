@@ -53,6 +53,8 @@ private const val TYPE_MS = 150L
 private const val FADE_START = 1_850L
 private const val FADE_MS = 450L
 private const val END = FADE_START + FADE_MS
+/** The globe starts drawing this long before the fade, so its first frame is ready under it. */
+private const val REVEAL_EARLY_MS = 150L
 
 private val LINES = listOf("BOOTING GLOBE", "LINKING SATELLITES", "CALIBRATING RADAR", "TUNING THE FEEDS", "OPENING THE WORLD")
 
@@ -61,20 +63,31 @@ private val Glass = Color(0xFF03130A)
 
 private fun ease(t: Float): Float = 1f - (1f - t.coerceIn(0f, 1f)).let { it * it * it }
 
+/**
+ * [onReveal] comes just before the fade, so the globe (drawing nothing until then) is there
+ * to show through; [onDone] when it has gone.
+ */
 @Composable
-fun BootSequence(onDone: () -> Unit) {
+fun BootSequence(onReveal: () -> Unit, onDone: () -> Unit) {
     var ms by remember { mutableLongStateOf(0L) }
     var skip by remember { mutableStateOf(false) }
     val done by rememberUpdatedState(onDone)
+    val reveal by rememberUpdatedState(onReveal)
     LaunchedEffect(Unit) {
         val t0 = withFrameMillis { it }
         var offset = 0L
+        var revealed = false
         while (true) {
             val now = withFrameMillis { it } - t0
             if (skip && now + offset < FADE_START) offset = FADE_START - now
             ms = now + offset
+            if (!revealed && ms >= FADE_START - REVEAL_EARLY_MS) {
+                revealed = true
+                reveal()
+            }
             if (ms >= END) break
         }
+        reveal()
         done()
     }
     val g = Palette.signal
@@ -98,7 +111,8 @@ fun BootSequence(onDone: () -> Unit) {
             val open = ease((ms - LINE_MS) / OPEN_MS.toFloat())
             val ph = line + (h - line) * open
             val top = cy - ph / 2f
-            drawRect(Glass.copy(alpha = 0.97f * fade), Offset(0f, top), Size(w, ph))
+            // Solid: nothing behind shows until the fade.
+            drawRect(Glass.copy(alpha = fade), Offset(0f, top), Size(w, ph))
             if (open < 1f) {
                 val edge = g.copy(alpha = 1f - open)
                 drawRect(edge, Offset(0f, top), Size(w, line))

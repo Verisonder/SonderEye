@@ -94,6 +94,9 @@ class GlobeRenderer(
     /** One route shown on its own, bold, over everything but the markers (a picked bus line). */
     @Volatile var highlight: RoadSet? = null
 
+    /** Draw nothing but empty space (the start-up screen is still up; the globe waits behind it). */
+    @Volatile var hold: Boolean = false
+
     /** Shade the night side (and show night lights where that overlay is on). */
     @Volatile var dayNight: Boolean = false
 
@@ -195,7 +198,7 @@ class GlobeRenderer(
 
     override fun onDrawFrame(gl: GL10?) {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
-        if (broken) return
+        if (broken || hold) return
         loader.nextFrame()
         uploadPending()
 
