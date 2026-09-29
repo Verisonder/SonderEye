@@ -274,6 +274,7 @@ class MainActivity : ComponentActivity() {
             // Fixes the draw order: later layers on top.
             for (name in listOf("fires", "quakes", "events", "cameras", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
+            globe?.northLocked = state.layers.northLock
         } else {
             state.globeError = "Globe: this phone reports OpenGL ES ${gl shr 16}.${gl and 0xFFFF}; 3.0 is required"
         }
@@ -418,6 +419,7 @@ class MainActivity : ComponentActivity() {
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
         Palette.dark = !new.lightPanels
+        if (new.northLock != old.northLock) globe?.northLocked = new.northLock
         if (new.credits != old.credits || new.cameras != old.cameras) applyMap()
         if (new.ships != old.ships && !new.ships) closeShips()
         if (new.webcams != old.webcams) loadWebcams(force = true)
@@ -779,10 +781,17 @@ class MainActivity : ComponentActivity() {
         return Marker("q:" + q.id, q.lat, q.lon, size, Palette.depth(q.depthKm).toArgb())
     }
 
+    /** Aircraft shrink as you zoom out, so a busy sky reads as traffic, not a pile of arrows. */
+    private fun planeSize(): Float {
+        val alt = globe?.center()?.get(2) ?: 1_000_000.0
+        val k = (1_200_000.0 / alt).coerceIn(0.45, 1.0)
+        return (20.0 * k).toFloat() * density
+    }
+
     private fun flightMarker(f: Flight, fetchedAt: Long, now: Long): Marker {
         val p = glide(f, fetchedAt, now)
         return Marker(
-            "f:" + f.hex, p[0], p[1], 20f * density,
+            "f:" + f.hex, p[0], p[1], planeSize(),
             (if (f.onGround) Palette.dim else Palette.flight).toArgb(),
             shape = Marker.SHAPE_PLANE, bearing = f.track ?: 0.0,
         )

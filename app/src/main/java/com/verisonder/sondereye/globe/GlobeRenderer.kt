@@ -243,7 +243,7 @@ class GlobeRenderer(
                 // Roads, labels and radar only download once the picture under them has:
                 // the photo is what you are waiting for.
                 val mayRequest = pass == 0 || k in baseReady || src.night
-                if (textures.containsKey(want)) {
+                if (textures[want] != null) { // get(): marks it recently used
                     found = want
                     if (pass == 0) baseReady.add(k)
                 } else if (!mayRequest) {
@@ -265,7 +265,7 @@ class GlobeRenderer(
                     // The bundled Blue Marble fills in wherever it is sharper than what has arrived.
                     val bm = TileSource.BLUE_MARBLE
                     val bmWant = SourcedTile(bm, bm.keyFor(k))
-                    val bmFound = if (textures.containsKey(bmWant)) bmWant else {
+                    val bmFound = if (textures[bmWant] != null) bmWant else {
                         if (bmWant !in absent) loader.request(bmWant)
                         loadedAncestor(bm, bmWant.key)
                     }
@@ -299,7 +299,7 @@ class GlobeRenderer(
         GLES30.glUniform1f(uShade, 0f) // lines keep their colour day and night
         drawLines(view, uMvp, uHasTex, uColor, uAlpha, uCenter)
         drawMarkers(view)
-        trim(textures, TEXTURE_CAP) { GLES30.glDeleteTextures(1, intArrayOf(it), 0) }
+        trimTextures()
         trim(meshes, MESH_CAP) { GLES30.glDeleteBuffers(1, intArrayOf(it), 0) }
 
         if (uploads.isNotEmpty()) requestRender()
@@ -315,7 +315,9 @@ class GlobeRenderer(
         var a = k.parent()
         while (a != null) {
             val t = SourcedTile(src, a)
-            if (textures.containsKey(t)) return t
+            // get(), not containsKey(): only get() marks it as recently used, and a parent
+            // standing in for missing tiles must be the last thing the cache drops.
+            if (textures[t] != null) return t
             a = a.parent()
         }
         return null
@@ -603,6 +605,24 @@ class GlobeRenderer(
     private fun upload(vbo: Int, data: FloatArray) {
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.size * 4, floats(data, data.size), GLES30.GL_STATIC_DRAW)
+    }
+
+    /**
+     * Drops the least recently used textures above the cap, but never zoom 0–3 of the base
+     * map or the bundled globe: that coarse backbone is what fills in anywhere you move.
+     */
+    private fun trimTextures() {
+        var excess = textures.size - TEXTURE_CAP
+        if (excess <= 0) return
+        val it = textures.entries.iterator()
+        while (excess > 0 && it.hasNext()) {
+            val e = it.next()
+            val k = e.key
+            if (k.key.z <= 3 && (k.source === base || k.source === TileSource.BLUE_MARBLE)) continue
+            GLES30.glDeleteTextures(1, intArrayOf(e.value), 0)
+            it.remove()
+            excess--
+        }
     }
 
     private fun <K> trim(map: LinkedHashMap<K, Int>, cap: Int, free: (Int) -> Unit) {

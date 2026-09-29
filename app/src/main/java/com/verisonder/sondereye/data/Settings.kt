@@ -52,6 +52,8 @@ data class Layers(
     val credits: Boolean = true,
     /** White chart-paper panels instead of dark ones. */
     val lightPanels: Boolean = false,
+    /** North stays up (long-press the N key). */
+    val northLock: Boolean = false,
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
@@ -86,6 +88,7 @@ class Settings(context: Context) {
             fires = prefs.getBoolean("fires.enabled", d.fires),
             credits = prefs.getBoolean("map.credits", d.credits),
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
+            northLock = prefs.getBoolean("ui.northLock", d.northLock),
         )
     }
 
@@ -114,6 +117,7 @@ class Settings(context: Context) {
             .putBoolean("fires.enabled", s.fires)
             .putBoolean("map.credits", s.credits)
             .putBoolean("ui.lightPanels", s.lightPanels)
+            .putBoolean("ui.northLock", s.northLock)
             .apply()
     }
 

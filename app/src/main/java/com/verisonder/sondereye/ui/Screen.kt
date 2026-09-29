@@ -264,14 +264,33 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 state.chromeHidden = true
             }
             ToolDivider()
-            // North up comes first when the map is turned: it is the key you need right then.
+            // North: tap to turn north up; long-press to lock it there (and again to unlock).
             val heading = state.view?.getOrNull(3) ?: 0.0
-            if (heading > 0.5 && heading < 359.5) {
-                Box(Modifier.size(48.dp).clickable(onClick = actions.northUp), Alignment.Center) {
-                    Text("N", color = Palette.magenta, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.rotate(-heading.toFloat()))
-                }
-                ToolDivider()
+            val locked = state.layers.northLock
+            val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .background(if (locked) Palette.magenta else Color.Transparent)
+                    .pointerInput(locked) {
+                        detectTapGestures(
+                            onTap = { actions.northUp() },
+                            onLongPress = {
+                                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                actions.change(state.layers.copy(northLock = !locked))
+                            },
+                        )
+                    },
+                Alignment.Center,
+            ) {
+                Text(
+                    "N",
+                    color = if (locked) Color.White else Palette.magenta,
+                    fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.rotate(if (locked) 0f else -heading.toFloat()),
+                )
             }
+            ToolDivider()
             Tool(Icons.Default.Menu, "Layers and settings", state.layersOpen) {
                 state.layersOpen = !state.layersOpen
                 state.search.open = false

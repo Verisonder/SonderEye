@@ -128,6 +128,13 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     /** Turns the map back to north up. */
     fun northUp() = flyTo(cam.copy(heading = 0.0), ms = 500)
 
+    /** North stays up: twisting two fingers no longer turns the map. */
+    var northLocked = false
+        set(v) {
+            field = v
+            if (v) northUp()
+        }
+
     fun home() = flyTo(CameraState.HOME)
 
     /** The map underneath and the transparent layers over it. */
@@ -321,7 +328,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
             MotionEvent.ACTION_MOVE -> if (tracking) {
                 if (hypot((fx - lastX).toDouble(), (fy - lastY).toDouble()) > 3.0 || used >= 2) listener.onUserGesture()
                 drag(lastX, lastY, fx, fy)
-                if (!angle.isNaN() && !lastAngle.isNaN()) {
+                if (!northLocked && !angle.isNaN() && !lastAngle.isNaN()) {
                     val d = Geo.toDeg(angle - lastAngle)
                     // Twisting the fingers clockwise turns the map with them.
                     setCam(cam.copy(heading = cam.heading - Geo.wrapLon(d)))
