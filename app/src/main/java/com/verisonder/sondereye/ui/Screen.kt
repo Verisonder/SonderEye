@@ -63,6 +63,8 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
@@ -175,8 +177,9 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         }
     }
 
-    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open || state.brief.open) {
+    BackHandler(enabled = state.layersOpen || state.selected != null || state.search.open || state.brief.open || state.chromeHidden) {
         when {
+            state.chromeHidden && state.selected == null -> state.chromeHidden = false
             state.brief.open -> actions.brief(false)
             state.search.open -> state.search.open = false
             state.layersOpen -> state.layersOpen = false
@@ -192,10 +195,28 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             )
         }
 
-        CompassRose(state.view?.getOrNull(3) ?: 0.0, Modifier.align(Alignment.Center))
+        val hidden = state.chromeHidden
+        if (!hidden) CompassRose(state.view?.getOrNull(3) ?: 0.0, Modifier.align(Alignment.Center))
 
         // An open panel takes the space; the legend and readout step aside rather than show under it.
-        val panelOpen = state.layersOpen || state.search.open || state.brief.open
+        // In the clean view everything steps aside.
+        val panelOpen = state.layersOpen || state.search.open || state.brief.open || hidden
+
+        if (hidden) {
+            // The only control left: a small tab on the right edge that brings everything back.
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                    .padding(top = 12.dp)
+                    .size(width = 30.dp, height = 56.dp)
+                    .background(Palette.panel.copy(alpha = 0.75f), RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
+                    .clickable { state.chromeHidden = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Show the controls", tint = Palette.text)
+            }
+        }
 
         // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
         if (!panelOpen) Column(
@@ -223,7 +244,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
         )
 
         // Right: one tool strip.
-        Column(
+        if (!hidden) Column(
             Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
@@ -231,6 +252,13 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
                 .background(Palette.panel, RoundedCornerShape(14.dp))
                 .border(1.dp, Palette.line, RoundedCornerShape(14.dp)),
         ) {
+            Tool(Icons.Default.KeyboardArrowRight, "Hide the controls", false) {
+                state.layersOpen = false
+                state.search.open = false
+                state.brief.open = false
+                state.chromeHidden = true
+            }
+            ToolDivider()
             Tool(Icons.Default.Menu, "Layers and settings", state.layersOpen) {
                 state.layersOpen = !state.layersOpen
                 state.search.open = false
