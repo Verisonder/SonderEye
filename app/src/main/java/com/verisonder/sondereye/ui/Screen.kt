@@ -194,8 +194,11 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
 
         CompassRose(state.view?.getOrNull(3) ?: 0.0, Modifier.align(Alignment.Center))
 
+        // An open panel takes the space; the legend and readout step aside rather than show under it.
+        val panelOpen = state.layersOpen || state.search.open || state.brief.open
+
         // Bottom left, as on a chart: scale bar, position, and the credits the providers require.
-        Column(
+        if (!panelOpen) Column(
             Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
@@ -210,7 +213,7 @@ fun EyeScreen(state: EyeState, globeView: GlobeView?, actions: Actions) {
             }
         }
 
-        Legend(
+        if (!panelOpen) Legend(
             state, actions,
             Modifier
                 .align(Alignment.TopStart)
@@ -1250,6 +1253,7 @@ private fun LayersPanel(
             KeyField("Google Gemini", "the written brief in Today", keys.gemini, "https://aistudio.google.com/apikey") { saveKeys(keys.copy(gemini = it)) }
 
             Divider()
+            Toggle("Light panels", s.lightPanels, true) { change(s.copy(lightPanels = it)) }
             Toggle("Show map credits", s.credits, true) { change(s.copy(credits = it)) }
             Text(
                 "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +

@@ -44,7 +44,18 @@ object Feeds {
 
     fun satellitesNamed(q: String) = Net.get(Lookup.satelliteUrl(q), "Search", "CelesTrak") { Tle.parseAll(it) }
 
-    fun news(src: NewsSource) = Net.get(src.url, "News", src.name) { News.parseRss(src.name, it) }
+    /**
+     * Some news sites turn away requests that do not look like a browser; a browser-style
+     * agent (still naming the app) gets the same public feed a feed reader would.
+     */
+    fun news(src: NewsSource) = Net.getWith(
+        src.url,
+        mapOf(
+            "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36 SonderEye",
+            "Accept" to "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        ),
+        "News", src.name,
+    ) { News.parseRss(src.name, it) }
 
     /** Tries each Gemini model name in turn: names change, the first that exists wins. */
     fun brief(key: String, stories: List<Story>, weather: String?, place: String?, prefs: com.verisonder.sondereye.core.BriefPrefs): Net.Outcome<String> {

@@ -50,6 +50,8 @@ data class Layers(
     val fires: Boolean = false,
     /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
     val credits: Boolean = true,
+    /** White chart-paper panels instead of dark ones. */
+    val lightPanels: Boolean = false,
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
@@ -83,6 +85,7 @@ class Settings(context: Context) {
             webcams = prefs.getBoolean("webcams.enabled", d.webcams),
             fires = prefs.getBoolean("fires.enabled", d.fires),
             credits = prefs.getBoolean("map.credits", d.credits),
+            lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
         )
     }
 
@@ -110,6 +113,7 @@ class Settings(context: Context) {
             .putBoolean("webcams.enabled", s.webcams)
             .putBoolean("fires.enabled", s.fires)
             .putBoolean("map.credits", s.credits)
+            .putBoolean("ui.lightPanels", s.lightPanels)
             .apply()
     }
 

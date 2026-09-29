@@ -226,6 +226,7 @@ class MainActivity : ComponentActivity() {
         state.layers = store.load()
         state.keys = store.keys()
         state.brief.prefs = store.brief()
+        Palette.dark = !state.layers.lightPanels
         installHttpCache()
         where = Where(
             this,
@@ -399,6 +400,7 @@ class MainActivity : ComponentActivity() {
         ) applyMap()
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
+        Palette.dark = !new.lightPanels
         if (new.credits != old.credits || new.cameras != old.cameras) applyMap()
         if (new.ships != old.ships && !new.ships) closeShips()
         if (new.webcams != old.webcams) loadWebcams(force = true)

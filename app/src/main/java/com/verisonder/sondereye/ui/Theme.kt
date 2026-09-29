@@ -2,7 +2,11 @@ package com.verisonder.sondereye.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -13,22 +17,25 @@ import androidx.compose.ui.unit.sp
 import com.verisonder.sondereye.R
 
 /*
- * Aeronautical chart: white chart paper and ink over the dark globe, sectional-chart
- * magenta for what matters most, chart blue for what you can open. One typeface,
- * Barlow Semi Condensed, from road-sign lettering.
+ * Aeronautical chart, night edition by default: dark panels (or white chart paper, in
+ * the menu), sectional-chart magenta for what matters most, chart blue for what you can
+ * open. One typeface, Barlow Semi Condensed, from road-sign lettering.
  */
 object Palette {
+    /** Dark panels (default) or light chart paper; switched in the menu. */
+    var dark by mutableStateOf(true)
+
     val space = Color(0xFF03060A)
-    /** Chart paper. Slightly see-through so the globe is never fully blocked. */
-    val panel = Color(0xF5FBFBF8)
-    val line = Color(0xFFD9D7D0)
-    val text = Color(0xFF15171B)
-    val dim = Color(0xFF5E636A)
+    // Opaque: the globe must never show through text.
+    val panel get() = if (dark) Color(0xFF151A20) else Color(0xFFFBFBF8)
+    val line get() = if (dark) Color(0xFF2B323B) else Color(0xFFD9D7D0)
+    val text get() = if (dark) Color(0xFFE9E7E2) else Color(0xFF15171B)
+    val dim get() = if (dark) Color(0xFF9BA2AA) else Color(0xFF5E636A)
     /** Sectional-chart magenta: north, the active tool, what needs attention. */
-    val magenta = Color(0xFFB0126B)
+    val magenta get() = if (dark) Color(0xFFE2489E) else Color(0xFFB0126B)
     /** Chart blue: links and actions. */
-    val accent = Color(0xFF1D5BA6)
-    val error = Color(0xFFC62828)
+    val accent get() = if (dark) Color(0xFF79B2FF) else Color(0xFF1D5BA6)
+    val error get() = if (dark) Color(0xFFFF7A70) else Color(0xFFC62828)
 
     // Marker colours on the globe (dark background).
     val shallow = Color(0xFFFFB547)
@@ -74,7 +81,20 @@ val Figures = TextStyle(fontFamily = Barlow, fontFeatureSettings = "tnum")
 fun EyeTheme(content: @Composable () -> Unit) {
     val base = TextStyle(fontFamily = Barlow)
     MaterialTheme(
-        colorScheme = lightColorScheme(
+        colorScheme = if (Palette.dark) darkColorScheme(
+            primary = Palette.magenta,
+            onPrimary = Color.White,
+            primaryContainer = Palette.magenta.copy(alpha = 0.25f),
+            secondaryContainer = Palette.magenta.copy(alpha = 0.25f),
+            onSecondaryContainer = Palette.text,
+            secondary = Palette.accent,
+            background = Palette.panel,
+            surface = Palette.panel,
+            onSurface = Palette.text,
+            onSurfaceVariant = Palette.dim,
+            outline = Palette.line,
+            error = Palette.error,
+        ) else lightColorScheme(
             primary = Palette.magenta,
             onPrimary = Color.White,
             secondary = Palette.accent,

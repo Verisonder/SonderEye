@@ -32,6 +32,10 @@ object Net {
     fun <T> getWith(url: String, headers: Map<String, String>, what: String, source: String, parse: (String) -> T): Outcome<T> =
         request(url, what, source, null, headers, parse)
 
+    /** Whether this request sent a personal key (so a refusal is about the key). */
+    private fun hasKey(url: String, headers: Map<String, String>) =
+        headers.keys.any { it.contains("key", true) } || Regex("[?&](key|api_?key|apikey)=").containsMatchIn(url) || "/api/area/" in url
+
     private fun <T> request(
         url: String, what: String, source: String, body: String?, headers: Map<String, String>, parse: (String) -> T,
     ): Outcome<T> {
@@ -46,6 +50,7 @@ object Net {
             conn.setRequestProperty("Accept", "application/json, text/plain, */*")
             conn.setRequestProperty("User-Agent", "SonderEye (github.com/Verisonder/SonderEye)")
             for ((k, v) in headers) conn.setRequestProperty(k, v)
+            conn.instanceFollowRedirects = true
             if (body != null) {
                 conn.requestMethod = "POST"
                 conn.doOutput = true
@@ -56,7 +61,10 @@ object Net {
             }
             val code = conn.responseCode
             if (code == 429) return Outcome.Failed("$what: $source asked us to slow down (HTTP 429)")
-            if (code == 401 || code == 403) return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
+            if ((code == 401 || code == 403) && hasKey(url, headers)) {
+                return Outcome.Failed("$what: $source refused the key (HTTP $code). Check it in the menu")
+            }
+            if (code == 403) return Outcome.Failed("$what: $source blocked the request (HTTP 403). It may block apps; turn it off in Today, Customise")
             if (code != 200) {
                 val detail = runCatching { conn.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull()
                     ?.let { Regex("\"message\"\\s*:\\s*\"([^\"]{1,160})").find(it)?.groupValues?.get(1) }
