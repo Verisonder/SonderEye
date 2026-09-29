@@ -522,7 +522,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
             LayerLine(
                 Palette.conflict,
                 if (c.loading && c.updatedAt == null) "Loading conflicts…" else count(c.items.size, "place in conflict news", "places in conflict news"),
-                "last 24 h, GDELT",
+                state.conflictsSavedAt?.let { "saved at ${clock(it)}, GDELT is down" } ?: "last 24 h, GDELT",
                 onOpen = { actions.openList("conflicts") },
             )
         }

@@ -220,6 +220,8 @@ class EyeState {
     var worldError by mutableStateOf<String?>(null)
     /** Places in the news for fighting, last 24 h (GDELT). */
     val conflicts = Feed<Conflict>()
+    /** When the conflicts shown were saved, while GDELT is not answering (null: they are live). */
+    var conflictsSavedAt by mutableStateOf<Long?>(null)
     /** Bus lines (one per direction) and their stops, OpenStreetMap. */
     val busLines = Feed<BusLine>()
     var busStops by mutableStateOf<List<BusStop>>(emptyList())
@@ -463,7 +465,9 @@ class MainActivity : ComponentActivity() {
                             if (!state.busLines.loading && (state.busLines.error == null || now - state.busLines.attemptAt >= 15_000) && busLinesStale()) loadBusLines()
                             showBusStops()
                         }
-                        if (l.conflicts && !state.conflicts.loading && now - state.conflicts.attemptAt >= CONFLICTS_MS) loadConflicts()
+                        // Every 15 min; while GDELT is failing, every 3.
+                        if (l.conflicts && !state.conflicts.loading &&
+                            now - state.conflicts.attemptAt >= (if (state.conflicts.error != null) 3 * 60_000L else CONFLICTS_MS)) loadConflicts()
                         if (l.buses && !state.buses.loading && now - state.buses.attemptAt >= maxOf(BUSES_MS, busesBackoffS * 1000L)) loadBuses()
                         if (l.ships) tickShips(now) else if (shipsOpen) closeShips()
                         if (l.webcams && !state.webcams.loading && now - state.webcams.attemptAt >= 15_000 && webcamArea.stale(globe?.center())) loadWebcams()
@@ -1057,16 +1061,32 @@ class MainActivity : ComponentActivity() {
         if (!state.layers.conflicts) return clear(state.conflicts, "conflicts", "x:")
         state.conflicts.loading = true
         state.conflicts.attemptAt = System.currentTimeMillis()
+        val file = java.io.File(cacheDir, "conflicts.json")
         run("conflicts") {
-            val out = withContext(Dispatchers.IO) { Feeds.conflicts() }
-            settle(state.conflicts, map(out) { it to 0 }, "conflicts") { list ->
-                list.map { c ->
-                    // Bigger where more of the news is about it.
-                    val size = (8.0 + 3.0 * kotlin.math.ln(c.count.coerceAtLeast(1).toDouble()) / kotlin.math.ln(2.0)).coerceIn(8.0, 22.0)
-                    Marker(c.key, c.lat, c.lon, size.toFloat() * density, Palette.conflict.toArgb())
+            val out = withContext(Dispatchers.IO) { Feeds.conflicts(saveTo = file) }
+            if (out is Net.Outcome.Failed && state.conflicts.items.isEmpty()) {
+                // GDELT's map service goes away now and then (it answers 404 meanwhile): show the
+                // last list it gave, if it is from the last day, and keep saying it is down.
+                val saved = withContext(Dispatchers.IO) {
+                    if (file.exists() && System.currentTimeMillis() - file.lastModified() < 24 * 3_600_000L)
+                        runCatching { com.verisonder.sondereye.core.Gdelt.parse(file.readText()) }.getOrNull() else null
+                }
+                if (saved != null) {
+                    settle(state.conflicts, Net.Outcome.Ok(saved to 0), "conflicts", ::conflictMarkers)
+                    state.conflictsSavedAt = file.lastModified()
+                    state.conflicts.error = "Conflicts: GDELT is not answering (${out.message.substringAfter("answered ", "error")}); showing its list from ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(file.lastModified()))}"
+                    return@run
                 }
             }
+            if (out is Net.Outcome.Ok) state.conflictsSavedAt = null
+            settle(state.conflicts, map(out) { it to 0 }, "conflicts", ::conflictMarkers)
         }
+    }
+
+    private fun conflictMarkers(list: List<Conflict>) = list.map { c ->
+        // Bigger where more of the news is about it.
+        val size = (8.0 + 3.0 * kotlin.math.ln(c.count.coerceAtLeast(1).toDouble()) / kotlin.math.ln(2.0)).coerceIn(8.0, 22.0)
+        Marker(c.key, c.lat, c.lon, size.toFloat() * density, Palette.conflict.toArgb())
     }
 
     // ---- Bus lines (OpenStreetMap) -------------------------------------------------------

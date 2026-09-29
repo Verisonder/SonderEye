@@ -91,7 +91,10 @@ object Feeds {
         return Net.Outcome.Ok(all.distinctBy { it.id })
     }
 
-    fun conflicts() = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT", com.verisonder.sondereye.core.Gdelt::parse)
+    /** The day's conflict places; a good answer is also saved to [saveTo] for when GDELT is down. */
+    fun conflicts(saveTo: java.io.File? = null) = Net.get(com.verisonder.sondereye.core.Gdelt.URL, "Conflicts", "GDELT") { t ->
+        com.verisonder.sondereye.core.Gdelt.parse(t).also { saveTo?.let { f -> runCatching { f.writeText(t) } } }
+    }
 
     /**
      * Overpass allows each phone only a query or two at a time and turns away the rest, and
