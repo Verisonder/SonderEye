@@ -1,39 +1,48 @@
-# SonderEye
+<p align="center">
+  <img src="docs/brand/logo.svg" width="128" alt="SonderEye logo: an eye whose iris is a radar scope">
+</p>
 
-Live public data on a 3D globe, on your phone. Free and open source, no account, no backend.
+<h1 align="center">SonderEye</h1>
 
-## Status
+<p align="center">The planet's live traffic on a 3D globe, on your phone.<br>
+Free, open source, no account, no backend.</p>
 
-Test builds only.
+---
 
-- Native 3D globe (OpenGL ES 3.0) from the whole Earth down to about 120 m, with atmosphere.
-- **Map**: satellite, streets, or today's Earth from space (NASA VIIRS), with optional roads and place names.
-- Drag, pinch toward a point, twist to rotate, fling, double-tap to zoom, long-press for the weather there.
-- **Earthquakes** (USGS), **flights** (adsb.lol), **satellites** (CelesTrak, computed on the phone),
-  **natural events** (NASA EONET), **rain radar** (RainViewer), **weather** (Open-Meteo).
-- **Where I am**, with the weather where you are and the next satellite passes over you.
-- **Day and night**: the night side shaded with a twilight band, city lights after dark.
-- **Flights** glide between updates, with 30-minute trails and a follow mode.
-- **Search**: places (OpenStreetMap), flights by callsign anywhere, satellites by name.
-- **Satellites** in every orbit: GPS and geostationary use a simplified high-orbit model (within about 50 km).
-- **Surveillance cameras** and licence-plate readers mapped in OpenStreetMap.
-- **Weather forecast**: 12 hours and 3 days; the rain radar loops over the past hour.
-- **Map cache** size and a clear button in the menu.
-- **Today**: the weather where you are and the day's top stories (BBC World, Al Jazeera, Morocco World
-  News, from their public feeds), with an optional written summary by Google Gemini (your own free key).
-- Map credits can be hidden while the app is private (Esri, RainViewer and OpenStreetMap require them once public).
-- **Sky view**: point the phone at the sky to see satellites, aircraft, the Sun and the Moon labelled.
-- **ISS pass alerts**: a notification about 10 minutes before each pass you can see.
-- The whole Earth down to country scale ships inside the app (NASA Blue Marble, zoom 2 to 6),
-  so the globe appears at once, even offline. Closer tiles are kept on disk (up to 500 MB).
-- Every failure is shown on screen.
+SonderEye puts public signals on one native globe: earthquakes, aircraft, satellites,
+ships, fires, storms and the weather, drawn on satellite imagery you can zoom from the
+whole Earth down to your street. It is an Android app, built from scratch with OpenGL ES,
+not a web page in a wrapper.
 
-- **Ships** (live AIS), **webcams** and **fire hotspots**: each needs a free personal key, pasted in the
-  app's menu and kept on the phone only.
+## What it shows
 
-## Roadmap
+**On the globe**
+- Earthquakes (USGS), sized by magnitude and coloured by depth.
+- Aircraft (adsb.lol), gliding between updates, with 30-minute trails and a follow mode.
+- Satellites (CelesTrak), positions computed on the phone every second, with the orbit of
+  the one you pick and its next passes over you. GPS and geostationary orbits included.
+- Ships (AISStream), fire hotspots (NASA FIRMS) and public webcams (Windy), each with your own free key.
+- Natural events (NASA EONET): wildfires, volcanoes, storms, ice.
+- Rain radar (RainViewer), optionally looping the past hour.
+- Surveillance cameras and licence-plate readers mapped in OpenStreetMap.
+- Day and night, with city lights on the dark side.
 
-- Tilted view toward the horizon, and terrain in 3D.
+**Around it**
+- **Today**: the weather where you are and the day's news from the sources you choose,
+  with an optional summary written by Gemini, made once a day.
+- **Sky view**: point the phone at the sky to see the satellites, aircraft, Sun and Moon above you, labelled.
+- **ISS pass alerts**: a notification before each pass you can actually see.
+- **Search** for places, flights by callsign, and satellites by name.
+- A list of every item in each layer, sortable, one tap from flying to it.
+
+## The globe
+
+- Native OpenGL ES 3.0, camera-relative rendering: no float jitter from 40,000 km down to 120 m.
+- Esri satellite imagery, streets, or yesterday's whole Earth from NASA, with roads and place names on top.
+- The whole Earth at country scale ships inside the app (NASA Blue Marble), so the globe appears at once, even offline.
+- Tiles load centre first, parents before children, and are kept on the phone (up to 500 MB).
+- Markers lie on the curved surface; satellites face you from orbit.
+- A radar scope over the screen centre: bearings, range rings at real ground distances, and a sweep.
 
 ## Data sources
 
@@ -53,7 +62,7 @@ Test builds only.
 | Ships | [AISStream](https://aisstream.io) live AIS over WebSocket | Free, GitHub sign-in |
 | Webcams | [Windy Webcams API](https://api.windy.com/webcams) | Free |
 | Fire hotspots | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov), VIIRS NOAA-20, last 24 h | Free, e-mail |
-| News | Publisher RSS feeds (BBC, Al Jazeera, Morocco World News) | None |
+| News | Publisher RSS/Atom feeds (12 built in, or your own) | None |
 | Written brief | [Google Gemini API](https://aistudio.google.com/apikey), optional | Free tier |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
@@ -71,10 +80,10 @@ gradle testDebugUnitTest
 
 CI downloads the bundled Blue Marble tiles (`tools/fetch_bluemarble.py`, about 5,500 tiles,
 cached between runs) before building; a local build without them still works, just without
-the built-in globe.
+the built-in globe. Pushes to `test/**` build a signed test APK and publish it as a pre-release
+named `test-<branch>`. Failed builds attach their output to the pre-release `ci-failure`.
 
-Pushes to `test/**` build a signed test APK and publish it as a pre-release named `test-<branch>`.
-Failed builds attach their output to the pre-release `ci-failure`.
+More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Licence
 

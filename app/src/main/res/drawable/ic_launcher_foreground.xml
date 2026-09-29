@@ -1,21 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- An eye whose iris is a globe: two lids, a round iris with one parallel and one meridian. -->
+<!-- The SonderEye mark (docs/brand/logo.svg): an eye whose iris is a radar scope. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="#00000000"
-        android:pathData="M28,54 C36,40 44,35 54,35 C64,35 72,40 80,54 C72,68 64,73 54,73 C44,73 36,68 28,54 Z" />
-    <path android:fillColor="#4FC3F7" android:pathData="M54,54m-12,0a12,12 0,1 1,24 0a12,12 0,1 1,-24 0" />
-    <path
-        android:strokeColor="#0B1A2A"
-        android:strokeWidth="2"
-        android:fillColor="#00000000"
-        android:pathData="M42.5,54 L65.5,54 M54,42 C49,47 49,61 54,66 C59,61 59,47 54,42" />
+    <!-- Logo coordinates are 512-unit; scaled to sit inside the 66 dp safe zone. -->
+    <group android:scaleX="0.16" android:scaleY="0.16" android:translateX="13.04" android:translateY="13.04">
+        <path
+            android:strokeColor="#5CF28E"
+            android:strokeWidth="18"
+            android:strokeLineJoin="round"
+            android:fillColor="#00000000"
+            android:pathData="M56,256 C118,150 186,118 256,118 C326,118 394,150 456,256 C394,362 326,394 256,394 C186,394 118,362 56,256 Z" />
+        <path
+            android:fillColor="#06150D"
+            android:strokeColor="#5CF28E"
+            android:strokeWidth="7"
+            android:pathData="M256,152 A104,104 0 1,1 255.9,152 Z" />
+        <path
+            android:fillColor="#5CF28E"
+            android:fillAlpha="0.3"
+            android:pathData="M256,256 L256,152 A104,104 0 0,1 346,204 Z" />
+        <path
+            android:strokeColor="#5CF28E"
+            android:strokeAlpha="0.45"
+            android:strokeWidth="5"
+            android:fillColor="#00000000"
+            android:pathData="M256,194 A62,62 0 1,1 255.9,194 Z" />
+        <path
+            android:strokeColor="#7DF5A5"
+            android:strokeWidth="7"
+            android:strokeLineCap="round"
+            android:pathData="M256,256 L346,204" />
+        <path android:fillColor="#7DF5A5" android:pathData="M306,190 m-11,0 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0" />
+        <path android:fillColor="#5CF28E" android:pathData="M256,256 m-10,0 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0" />
+    </group>
 </vector>

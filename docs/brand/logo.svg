@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>SonderEye</title>
+  <defs>
+    <radialGradient id="glass" cx="50%" cy="45%" r="65%">
+      <stop offset="0" stop-color="#0B2216"/>
+      <stop offset="1" stop-color="#040C08"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5CF28E" stop-opacity="0"/>
+      <stop offset="1" stop-color="#5CF28E" stop-opacity="0.55"/>
+    </linearGradient>
+    <clipPath id="iris"><circle cx="256" cy="256" r="104"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#glass)"/>
+  <!-- The eye: two lids -->
+  <path d="M56 256 C 118 150, 186 118, 256 118 C 326 118, 394 150, 456 256 C 394 362, 326 394, 256 394 C 186 394, 118 362, 56 256 Z"
+        fill="none" stroke="#5CF28E" stroke-width="16" stroke-linejoin="round"/>
+  <!-- The iris is a radar scope -->
+  <circle cx="256" cy="256" r="104" fill="#06150D" stroke="#5CF28E" stroke-width="6"/>
+  <g clip-path="url(#iris)">
+    <path d="M256 256 L256 152 A104 104 0 0 1 346 204 Z" fill="url(#sweep)"/>
+  </g>
+  <circle cx="256" cy="256" r="62" fill="none" stroke="#5CF28E" stroke-opacity="0.45" stroke-width="4"/>
+  <line x1="256" y1="256" x2="346" y2="204" stroke="#7DF5A5" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="306" cy="190" r="10" fill="#7DF5A5"/>
+  <circle cx="256" cy="256" r="9" fill="#5CF28E"/>
+</svg>
