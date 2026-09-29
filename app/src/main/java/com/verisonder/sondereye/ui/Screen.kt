@@ -578,12 +578,16 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
         state.shipsProblem, state.globeError,
     ).size + if ((state.globeStatus?.failures ?: 0) > 0) 1 else 0
     val shape = RoundedCornerShape(2.dp)
+    // Sideways the details are taller than the screen: the panel stops above the bottom and scrolls.
+    val maxH = (LocalConfiguration.current.screenHeightDp - 80).coerceAtLeast(160)
     Column(
         modifier
             .background(Palette.panel, shape)
             .border(1.dp, if (problems > 0) Palette.error else Palette.line, shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .animateContentSize(),
+            .animateContentSize()
+            .heightIn(max = maxH.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         val l = state.layers
         fun n(f: Feed<*>) = if (f.updatedAt == null && f.loading) "…" else f.items.size.toString()
@@ -611,15 +615,13 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                     .align(Alignment.TopEnd)
                     .offset(x = 6.dp, y = (-4).dp)
                     .size(30.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (open) Palette.signal else Color.Transparent)
                     .clickable { open = !open },
                 Alignment.Center,
             ) {
                 Icon(
                     if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = if (open) "Hide the details" else "Show the details",
-                    tint = if (open) Palette.onSignal else Palette.signal, modifier = Modifier.size(22.dp),
+                    tint = Palette.signal, modifier = Modifier.size(24.dp),
                 )
             }
         }
