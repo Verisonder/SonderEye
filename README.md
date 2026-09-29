@@ -16,8 +16,8 @@ Free, open source, no account, no backend.</p>
 
 SonderEye puts public signals on one native globe: earthquakes, aircraft, satellites,
 ships, fires, storms and the weather, drawn on satellite imagery you can zoom from the
-whole Earth down to your street. It is an Android app, built from scratch with OpenGL ES,
-not a web page in a wrapper.
+whole Earth down to your street. It is a native app for Android and Windows, built from
+scratch, not a web page in a wrapper.
 
 ## What it shows
 
