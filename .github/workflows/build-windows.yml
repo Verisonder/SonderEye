@@ -73,7 +73,9 @@ jobs:
           $bmp.Save("screenshot.png")
           "running after 45 s: $(-not $p.HasExited)" | Out-File smoke.txt
           # Memory: after start-up, then after two minutes of zooming in and out and dragging.
-          $p.Refresh(); "memory after start-up: $([math]::Round($p.PrivateMemorySize64 / 1MB)) MB" | Out-File -Append smoke.txt
+          # The launcher starts Java as a separate process: measure every SonderEye/java process.
+          function Mem { (Get-Process | Where-Object { $_.Name -match 'SonderEye|java' } | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB }
+          "memory after start-up: $([math]::Round((Mem))) MB" | Out-File -Append smoke.txt
           Add-Type -TypeDefinition @"
           using System; using System.Runtime.InteropServices;
           public static class Mouse {
@@ -91,7 +93,8 @@ jobs:
             for ($i = 0; $i -lt 8; $i++) { [Mouse]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero); Start-Sleep -Milliseconds 150 }
             Start-Sleep -Seconds 4
           }
-          $p.Refresh(); "memory after two minutes of use: $([math]::Round($p.PrivateMemorySize64 / 1MB)) MB" | Out-File -Append smoke.txt
+          "memory after two minutes of use: $([math]::Round((Mem))) MB" | Out-File -Append smoke.txt
+          Get-Process | Sort-Object PrivateMemorySize64 -Descending | Select-Object -First 4 Name, @{n='MB';e={[math]::Round($_.PrivateMemorySize64 / 1MB)}} | Out-File -Append smoke.txt
           $log = Join-Path $env:LOCALAPPDATA "SonderEye/files/crash.log"
           if (Test-Path $log) { Get-Content $log | Out-File -Append smoke.txt } else { "no crash log" | Out-File -Append smoke.txt }
           if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
