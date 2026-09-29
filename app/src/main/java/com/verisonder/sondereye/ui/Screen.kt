@@ -1891,7 +1891,6 @@ private fun LayersPanel(
             Divider()
             Toggle("Light panels", s.lightPanels, true) { change(s.copy(lightPanels = it)) }
             Toggle("Start-up animation", s.bootAnimation, true) { change(s.copy(bootAnimation = it)) }
-            Toggle("Show map credits", s.credits, true) { change(s.copy(credits = it)) }
             Text(
                 "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +
                     "Sources in use: " + allCredits.joinToString(", ") + ".",

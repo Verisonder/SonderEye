@@ -58,7 +58,7 @@ data class Layers(
     val bootAnimation: Boolean = true,
     /** Layers kept off the map (by their list's name) though still loaded: "Hide" in a list. */
     val hidden: Set<String> = emptySet(),
-    /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
+    /** No longer used: the credits Esri, OSM and RainViewer require are always shown. Kept so old settings still read. */
     val credits: Boolean = true,
     /** White chart-paper panels instead of dark ones. */
     val lightPanels: Boolean = false,

@@ -602,7 +602,8 @@ class MainActivity : ComponentActivity() {
         }
         if (roadsWanted()) all.add("Street roads: OpenFreeMap, © OpenMapTiles")
         state.allCredits = all.distinct()
-        state.credits = if (state.layers.credits) required.distinct() else emptyList()
+        // Always shown: Esri, OpenStreetMap and RainViewer require it wherever their data is.
+        state.credits = required.distinct()
     }
 
     // ---- Daily brief --------------------------------------------------------------------
