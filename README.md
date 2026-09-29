@@ -23,8 +23,11 @@ not a web page in a wrapper.
   the one you pick and its next passes over you. GPS and geostationary orbits included.
 - Ships (AISStream), fire hotspots (NASA FIRMS) and public webcams (Windy), each with your own free key.
 - Natural events (NASA EONET): wildfires, volcanoes, storms, ice.
+- Conflicts: places the world's news reports fighting in, last 24 hours (GDELT), with the stories.
 - Rain radar (RainViewer), optionally looping the past hour.
 - Surveillance cameras and licence-plate readers mapped in OpenStreetMap.
+- Bus lines and stops mapped in OpenStreetMap, and live buses wherever the operator
+  publishes GTFS Realtime (found through Transitland, with your own free key).
 - Day and night, with city lights on the dark side.
 
 **Around it**
@@ -65,6 +68,9 @@ not a web page in a wrapper.
 | News | Publisher RSS/Atom feeds (12 built in, or your own) | None |
 | Written brief | [Google Gemini API](https://aistudio.google.com/apikey), optional | Free tier |
 | Surveillance cameras | OpenStreetMap via the [Overpass API](https://overpass-api.de) | None |
+| Conflicts | [GDELT](https://www.gdeltproject.org) GEO 2.0, armed-conflict theme, last 24 h | None |
+| Bus lines and stops | OpenStreetMap via the Overpass API | None |
+| Live buses | Operators' GTFS Realtime feeds, found and relayed by [Transitland](https://www.transit.land) | Free |
 | Imagery | Esri World Imagery (Esri, Maxar, Earthstar Geographics) | None |
 
 Permissions: internet; location only for "Where I am"; camera only for the sky view; notifications only for pass alerts.
@@ -89,5 +95,5 @@ More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 GPL-3.0-only. See [LICENSE](LICENSE).
 
-Bundled typeface: Barlow Semi Condensed, SIL Open Font License 1.1 ([licenses/Barlow-OFL.txt](licenses/Barlow-OFL.txt)).
+Bundled typeface: Roboto Condensed, SIL Open Font License 1.1 ([licenses/RobotoCondensed-OFL.txt](licenses/RobotoCondensed-OFL.txt)).
 The S in the logo is drawn from Audiowide, SIL Open Font License 1.1 ([licenses/Audiowide-OFL.txt](licenses/Audiowide-OFL.txt)).
