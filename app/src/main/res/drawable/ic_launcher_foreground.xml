@@ -22,18 +22,13 @@
             android:fillColor="#5CF28E"
             android:fillAlpha="0.3"
             android:pathData="M256,256 L256,152 A104,104 0 0,1 346,204 Z" />
-        <path
-            android:strokeColor="#5CF28E"
-            android:strokeAlpha="0.45"
-            android:strokeWidth="5"
-            android:fillColor="#00000000"
-            android:pathData="M256,194 A62,62 0 1,1 255.9,194 Z" />
+        <!-- The S: two half range-rings meeting at the scope's centre. -->
         <path
             android:strokeColor="#7DF5A5"
-            android:strokeWidth="7"
+            android:strokeWidth="18"
             android:strokeLineCap="round"
-            android:pathData="M256,256 L346,204" />
-        <path android:fillColor="#7DF5A5" android:pathData="M306,190 m-11,0 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0" />
-        <path android:fillColor="#5CF28E" android:pathData="M256,256 m-10,0 a10,10 0 1,0 20,0 a10,10 0 1,0 -20,0" />
+            android:fillColor="#00000000"
+            android:pathData="M256,166 A45,45 0 0,0 256,256 A45,45 0 0,1 256,346" />
+        <path android:fillColor="#7DF5A5" android:pathData="M318,186 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
     </group>
 </vector>

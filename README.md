@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/logo.svg" width="128" alt="SonderEye logo: an eye whose iris is a radar scope">
+  <img src="docs/brand/logo.svg" width="128" alt="SonderEye logo: an eye whose iris is a radar scope with an S traced in it">
 </p>
 
 <h1 align="center">SonderEye</h1>

@@ -20,8 +20,8 @@
   <g clip-path="url(#iris)">
     <path d="M256 256 L256 152 A104 104 0 0 1 346 204 Z" fill="url(#sweep)"/>
   </g>
-  <circle cx="256" cy="256" r="62" fill="none" stroke="#5CF28E" stroke-opacity="0.45" stroke-width="4"/>
-  <line x1="256" y1="256" x2="346" y2="204" stroke="#7DF5A5" stroke-width="6" stroke-linecap="round"/>
-  <circle cx="306" cy="190" r="10" fill="#7DF5A5"/>
-  <circle cx="256" cy="256" r="9" fill="#5CF28E"/>
+  <!-- The S: two half range-rings meeting at the scope's centre, like a radar trace. -->
+  <path d="M256,166 A45,45 0 0,0 256,256 A45,45 0 0,1 256,346"
+        fill="none" stroke="#7DF5A5" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="318" cy="186" r="11" fill="#7DF5A5"/>
 </svg>
