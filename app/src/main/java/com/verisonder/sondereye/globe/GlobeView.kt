@@ -71,7 +71,25 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
      */
     fun setLayer(name: String, list: List<Marker>) {
         layers[name] = list
-        all = layers.values.flatten()
+        rebuildMarkers()
+    }
+
+    private var hiddenLayers: Set<String> = emptySet()
+    private var hiddenLines: Set<String> = emptySet()
+    private var highlightSet: RoadSet? = null
+
+    /** Marker layers and line groups kept off the map (still loaded, so they come back at once). */
+    fun setHidden(markerLayers: Set<String>, lineGroups: Set<String>) {
+        hiddenLayers = markerLayers
+        hiddenLines = lineGroups
+        rebuildMarkers()
+        renderer.lines = this.lineGroups.filterKeys { it !in hiddenLines }.values.flatten()
+        renderer.highlight = if ("busLines" in hiddenLines) null else highlightSet
+        requestRender()
+    }
+
+    private fun rebuildMarkers() {
+        all = layers.filterKeys { it !in hiddenLayers }.values.flatten()
         renderer.markers = all
         // Picking uses the altitude too: a satellite is picked where it is drawn.
         markerLat = DoubleArray(all.size) { all[it].lat }
@@ -82,11 +100,15 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     private var markerAlt = DoubleArray(0)
 
-    /** Rings the marker with [key] (or none); flies to it when [fly]. */
-    fun select(key: String?, fly: Boolean) {
+    /**
+     * Rings the marker with [key] (or none); flies to it when [fly]. [stayClose]: never
+     * further out than now (a tap on the map: a bus stop tapped at street level stays there).
+     */
+    fun select(key: String?, fly: Boolean, stayClose: Boolean = false) {
         renderer.selectedKey = key
         val m = if (key == null) null else all.firstOrNull { it.key == key }
-        if (fly && m != null) flyTo(m.lat, m.lon, cam.alt.coerceIn(600_000.0, 4_000_000.0))
+        val alt = if (stayClose) cam.alt.coerceAtMost(4_000_000.0) else cam.alt.coerceIn(600_000.0, 4_000_000.0)
+        if (fly && m != null) flyTo(m.lat, m.lon, alt)
         requestRender()
     }
 
@@ -103,7 +125,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     /** Replaces one named group of lines (the orbit, the trails). */
     fun setLines(name: String, lines: List<GlobeLine>) {
         lineGroups[name] = lines
-        renderer.lines = lineGroups.values.flatten()
+        renderer.lines = lineGroups.filterKeys { it !in hiddenLines }.values.flatten()
         requestRender()
     }
 
@@ -116,7 +138,8 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
 
     /** One route drawn bold over the map (a picked bus line); null clears it. */
     fun setHighlight(set: RoadSet?) {
-        renderer.highlight = set
+        highlightSet = set
+        renderer.highlight = if ("busLines" in hiddenLines) null else set
         requestRender()
     }
 
@@ -330,7 +353,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
             val i = Pick.nearest(view(), markerLat, markerLon, e.x.toDouble(), e.y.toDouble(), 30.0 * density, markerAlt)
             val key = all.getOrNull(i)?.key
             listener.onTap(key)
-            select(key, fly = key != null)
+            select(key, fly = key != null, stayClose = true)
             return true
         }
 

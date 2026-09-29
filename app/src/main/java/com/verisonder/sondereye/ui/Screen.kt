@@ -125,6 +125,7 @@ import com.verisonder.sondereye.core.Bus
 import com.verisonder.sondereye.core.BusLine
 import com.verisonder.sondereye.core.BusStop
 import com.verisonder.sondereye.core.Camera
+import com.verisonder.sondereye.core.Geo
 import com.verisonder.sondereye.core.Conflict
 import com.verisonder.sondereye.core.Hotspot
 import com.verisonder.sondereye.core.Ship
@@ -160,6 +161,8 @@ class Actions(
     val change: (Layers) -> Unit,
     val select: (Sel?) -> Unit,
     val home: () -> Unit,
+    /** Start riding a bus line (the map follows you along it), or stop (null). */
+    val ride: (BusLine?) -> Unit,
     /** The start-up screen is about to fade: let the globe be drawn. */
     val revealGlobe: () -> Unit,
     /** Hold on the Earth key: zoom at this rate (above 0 in, below 0 out); 0 stops. */
@@ -626,17 +629,17 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 Modifier.padding(end = 30.dp), // room for the hide key
                 horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes") { actions.openList("quakes") }
-                if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights") { actions.openList("flights") }
-                if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites") { actions.openList("sats") }
-                if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships") { actions.openList("ships") }
-                if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events") { actions.openList("events") }
-                if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires") { actions.openList("fires") }
-                if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras") { actions.openList("cameras") }
-                if (l.conflicts) Key(Sym.DOT, Palette.conflict, n(state.conflicts), "conflicts") { actions.openList("conflicts") }
-                if (l.busLines) Key(Sym.DOT, Palette.bus, if (state.busLinesNote != null) "–" else n(state.busLines), "bus lines") { actions.openList("busLines") }
-                if (l.buses) Key(Sym.PLANE, Palette.bus, if (state.busesNote != null) "–" else n(state.buses), "buses") { actions.openList("buses") }
-                if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams") { actions.openList("webcams") }
+                if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes", off = "quakes" in state.layers.hidden) { actions.openList("quakes") }
+                if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights", off = "flights" in state.layers.hidden) { actions.openList("flights") }
+                if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites", off = "sats" in state.layers.hidden) { actions.openList("sats") }
+                if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships", off = "ships" in state.layers.hidden) { actions.openList("ships") }
+                if (l.events) Key(Sym.DOT, Palette.event("wildfires"), n(state.events), "events", off = "events" in state.layers.hidden) { actions.openList("events") }
+                if (l.fires) Key(Sym.DOT, Palette.fire, if (state.firesNote != null) "–" else n(state.fires), "fires", off = "fires" in state.layers.hidden) { actions.openList("fires") }
+                if (l.cameras) Key(Sym.DOT, Palette.alpr, if (state.camerasNote != null) "–" else n(state.cameras), "cameras", off = "cameras" in state.layers.hidden) { actions.openList("cameras") }
+                if (l.conflicts) Key(Sym.DOT, Palette.conflict, n(state.conflicts), "conflicts", off = "conflicts" in state.layers.hidden) { actions.openList("conflicts") }
+                if (l.busLines) Key(Sym.DOT, Palette.bus, if (state.busLinesNote != null) "–" else n(state.busLines), "bus lines", off = "busLines" in state.layers.hidden) { actions.openList("busLines") }
+                if (l.buses) Key(Sym.PLANE, Palette.bus, if (state.busesNote != null) "–" else n(state.buses), "buses", off = "buses" in state.layers.hidden) { actions.openList("buses") }
+                if (l.webcams) Key(Sym.DIAMOND, Palette.webcam, if (state.webcamsNote != null) "–" else n(state.webcams), "webcams", off = "webcams" in state.layers.hidden) { actions.openList("webcams") }
                 if (l.radar) Key(Sym.RAIN, Color(0xFF3FA7FF), state.radarFrameAt?.let { clock(it) } ?: "…", "radar")
             }
             Box(Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp).size(30.dp).clickable { state.legendHidden = true }, Alignment.Center) {
@@ -661,6 +664,13 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 "Following ${f?.callsign ?: hex.uppercase()}. Tap here to stop.",
                 color = Palette.signal, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 6.dp).clickable { actions.follow(null) },
+            )
+        }
+        state.riding?.let { line ->
+            Text(
+                "Riding line ${line.short}. Tap here to stop.",
+                color = Palette.signal, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 6.dp).clickable { actions.ride(null) },
             )
         }
         if (open) {
@@ -691,8 +701,12 @@ private fun problemCount(state: EyeState): Int = listOfNotNull(
 
 /** One legend entry: symbol, count, name. Tap it for the full list. */
 @Composable
-private fun Key(sym: Sym, color: Color, value: String, name: String, onOpen: (() -> Unit)? = null) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier) {
+private fun Key(sym: Sym, color: Color, value: String, name: String, off: Boolean = false, onOpen: (() -> Unit)? = null) {
+    // A layer hidden from the map stays in the legend, greyed out; its list has "Show".
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = (if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier).alpha(if (off) 0.35f else 1f),
+    ) {
         Symbol(sym, color, 14.dp)
         Spacer(Modifier.width(5.dp))
         Text(value, color = Palette.text, style = Figures.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold))
@@ -1040,7 +1054,7 @@ private fun SelectionCard(sel: Sel, state: EyeState, now: Long, actions: Actions
                 is Sel.OfFire -> FireBody(sel.h, context, close)
                 is Sel.OfConflict -> ConflictBody(sel.c, context, close)
                 is Sel.OfBusStop -> BusStopBody(sel.s, state, actions, close)
-                is Sel.OfBusLine -> BusLineBody(sel.l, state, context, close)
+                is Sel.OfBusLine -> BusLineBody(sel.l, state, actions, context, close)
                 is Sel.OfBus -> BusBody(sel.b, state, close)
                 is Sel.OfSat -> SatBody(sel.s, state, actions, close)
                 is Sel.OfEvent -> EventBody(sel.e, now, context, close)
@@ -1184,13 +1198,29 @@ private fun ColumnScope.BusStopBody(s: BusStop, state: EyeState, actions: Action
 }
 
 @Composable
-private fun ColumnScope.BusLineBody(l: BusLine, state: EyeState, context: Context, onClose: () -> Unit) {
+private fun ColumnScope.BusLineBody(l: BusLine, state: EyeState, actions: Actions, context: Context, onClose: () -> Unit) {
     val colour = Color(0xFF000000 or l.shown.toLong())
     Header(null, colour, "Line ${l.short}", l.route, onClose, Sym.DOT)
     val stops = l.stopIds.mapNotNull { id -> state.busStops.firstOrNull { it.id == id } }
-    Line(listOfNotNull(l.network ?: l.operator, if (stops.isEmpty()) null else "${stops.size} stops in view").joinToString(", ").ifEmpty { "Bus line" })
+    Line(listOfNotNull(l.operatorShown, if (stops.isEmpty()) null else "${stops.size} stops in view").joinToString(", ").ifEmpty { "Bus line" })
     val named = stops.mapNotNull { it.name }
     if (named.size >= 2) Line("${named.first()} … ${named.last()}")
+    // On the bus: where you are along the line.
+    val riding = state.riding?.id == l.id
+    val p = state.ride
+    if (riding) {
+        when {
+            state.me == null -> Line("Finding your position…", Palette.signal)
+            p == null -> Line("None of this line's stops are loaded here.", Palette.error)
+            else -> {
+                val next = stops.getOrNull(p.next)?.name ?: "the next stop"
+                val eta = state.rideSpeed?.takeIf { it > 1.5f }?.let { v -> " (about ${maxOf(1, (p.metres / v / 60).roundToInt())} min)" } ?: ""
+                Line("Next stop: $next, ${distance(p.metres)}$eta", Palette.signal)
+                Line(if (p.left <= 1) "That is the last stop." else "${p.left} stops to ${named.lastOrNull() ?: "the end"}", Palette.text)
+            }
+        }
+    }
+    FoButton(if (riding) "Stop riding" else "I'm on this bus") { actions.ride(if (riding) null else l) }
     LinkRow("Mapped by OpenStreetMap volunteers", "Open in OSM") { openUrl(context, "https://www.openstreetmap.org/relation/${l.id}") }
 }
 
@@ -1358,6 +1388,30 @@ private fun weatherDetail(w: Weather): String = listOfNotNull(
 /** One row: what it is, the key facts, and where to go when tapped. */
 private class ListRow(val sel: Sel, val sym: Sym, val color: Color, val title: String, val detail: String, val sortA: Double, val sortB: Double)
 
+/** Where a listed thing is, to order a list by distance from the middle of the view. */
+private fun placeOf(sel: Sel, now: Long): DoubleArray? = when (sel) {
+    is Sel.OfQuake -> doubleArrayOf(sel.q.lat, sel.q.lon)
+    is Sel.OfFlight -> doubleArrayOf(sel.f.lat, sel.f.lon)
+    is Sel.OfSat -> sel.s.ecefAt(now)?.let { Geo.latLon(it) }
+    is Sel.OfEvent -> doubleArrayOf(sel.e.lat, sel.e.lon)
+    is Sel.OfCamera -> doubleArrayOf(sel.c.lat, sel.c.lon)
+    is Sel.OfShip -> doubleArrayOf(sel.s.lat, sel.s.lon)
+    is Sel.OfWebcam -> doubleArrayOf(sel.w.lat, sel.w.lon)
+    is Sel.OfFire -> doubleArrayOf(sel.h.lat, sel.h.lon)
+    is Sel.OfConflict -> doubleArrayOf(sel.c.lat, sel.c.lon)
+    is Sel.OfBus -> doubleArrayOf(sel.b.lat, sel.b.lon)
+    is Sel.OfBusStop -> doubleArrayOf(sel.s.lat, sel.s.lon)
+    is Sel.OfBusLine -> sel.l.paths.flatten().let { it.getOrNull(it.size / 2) }
+    else -> null
+}
+
+/** "350 m", "4.2 km", "1,240 km". */
+private fun distance(m: Double): String = when {
+    m < 1_000 -> "${(m / 10).roundToInt() * 10} m"
+    m < 100_000 -> "%.1f km".format(m / 1000)
+    else -> "%,d km".format((m / 1000).roundToInt())
+}
+
 @Composable
 private fun LayerList(layer: String, state: EyeState, actions: Actions) {
     val now = state.clock
@@ -1408,7 +1462,7 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
         })
         "busLines" -> Triple("Bus lines", "Number" to "Stops", state.busLines.items.mapIndexed { i, l ->
             ListRow(Sel.OfBusLine(l), Sym.DOT, Color(0xFF000000 or l.shown.toLong()), "Line ${l.short}",
-                l.route.ifEmpty { l.network ?: "" }, -i.toDouble(), l.stopIds.size.toDouble())
+                l.route.ifEmpty { l.operatorShown ?: "" }, -i.toDouble(), l.stopIds.size.toDouble())
         })
         "buses" -> Triple("Live buses", "Route" to "Latest report", state.buses.items.sortedBy { it.routeId?.padStart(6, '0') ?: "~" }.mapIndexed { i, b ->
             ListRow(Sel.OfBus(b), Sym.PLANE, Palette.bus, b.routeId?.let { "Route $it" } ?: "Bus",
@@ -1420,11 +1474,22 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
         })
         else -> Triple(layer, "" to "", emptyList())
     }
-    var second by remember(layer) { mutableStateOf(false) }
+    // Nearest first by default: what is around the part of the world you are looking at.
+    var order by remember(layer) { mutableStateOf(0) }
     var filter by remember(layer) { mutableStateOf("") }
+    val centre = state.view?.let { Geo.ecef(it[0], it[1]) }
+    val away = remember(rows, centre?.x, centre?.y) {
+        rows.associateWith { r -> centre?.let { c -> placeOf(r.sel, now)?.let { p -> Geo.angle(Geo.ecef(p[0], p[1]), c) * EARTH_R } } }
+    }
     val shown = rows
         .filter { filter.isBlank() || it.title.contains(filter, true) || it.detail.contains(filter, true) }
-        .sortedByDescending { if (second) it.sortB else it.sortA }
+        .let { list ->
+            when (order) {
+                0 -> list.sortedBy { away[it] ?: Double.MAX_VALUE }
+                1 -> list.sortedByDescending { it.sortA }
+                else -> list.sortedByDescending { it.sortB }
+            }
+        }
     Surface(
         color = Palette.panel,
         shape = RoundedCornerShape(2.dp),
@@ -1438,8 +1503,18 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
             // Fires and webcams list the whole world, whatever the view shows.
             if (state.worldLoading == layer) Text("Loading the whole world…", color = Palette.dim, fontSize = 13.sp)
             if (layer == "fires" || layer == "webcams") state.worldError?.let { Text(it, color = Palette.error, fontSize = 13.sp) }
-            if (orders.first.isNotEmpty()) {
-                ChipRow(listOf(false, true), second, { if (it) orders.second else orders.first }, true) { second = it }
+            // The orders, then Hide: keeps the layer off the map (greyed in the legend) until Show.
+            val hidden = layer in state.layers.hidden
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (orders.first.isNotEmpty()) {
+                    listOf("Nearest", orders.first, orders.second).forEachIndexed { i, label ->
+                        FoChip(label, order == i) { order = i }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+                FoChip(if (hidden) "Show" else "Hide", hidden) {
+                    actions.change(state.layers.copy(hidden = if (hidden) state.layers.hidden - layer else state.layers.hidden + layer))
+                }
             }
             if (rows.size > 8) {
                 OutlinedTextField(
@@ -1463,7 +1538,9 @@ private fun LayerList(layer: String, state: EyeState, actions: Actions) {
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(r.title, color = Palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (r.detail.isNotEmpty()) Text(r.detail, color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val far = away[r]?.takeIf { order == 0 }?.let { distance(it) + " away" }
+                            val detail = listOfNotNull(far, r.detail.ifEmpty { null }).joinToString(", ")
+                            if (detail.isNotEmpty()) Text(detail, color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Text("›", color = Palette.signal, fontSize = 20.sp)
                     }

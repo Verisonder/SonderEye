@@ -75,4 +75,22 @@ class TransitTest {
         assertEquals("f-x~rt/e3", buses[1].key)
         assertNull(buses[1].routeId)
     }
+
+    @Test fun isalInTangierOnly() {
+        fun line(lat: Double, lon: Double, net: String) = BusLine(1, "L1", null, null, null, net, null, null, listOf(listOf(doubleArrayOf(lat, lon), doubleArrayOf(lat, lon))), emptyList())
+        assertEquals("ISAL TANGER", line(35.77, -5.80, "ALSA TANGER").operatorShown)
+        assertEquals("Isal Tanger", line(35.77, -5.80, "Alsa Tanger").operatorShown)
+        assertEquals("ALSA City", line(40.4, -3.7, "ALSA City").operatorShown) // Madrid keeps ALSA
+    }
+
+    @Test fun rideProgress() {
+        // Three stops about 500 m apart going east.
+        val stops = listOf(doubleArrayOf(35.77, -5.80), doubleArrayOf(35.77, -5.7945), doubleArrayOf(35.77, -5.789))
+        val between = Ride.progress(stops, 35.77, -5.797)!! // between the first two
+        assertEquals(1, between.next); assertEquals(2, between.left)
+        assertTrue(between.metres in 200.0..300.0)
+        assertEquals(1, Ride.progress(stops, 35.7701, -5.80)!!.next) // at the first stop: the next is the second
+        assertEquals(2, Ride.progress(stops, 35.77, -5.7892)!!.next) // at the last: it stays the last
+        assertEquals(1, Ride.progress(stops, 35.77, -5.789)!!.left)
+    }
 }

@@ -28,6 +28,18 @@ class BusLine(
      */
     val shown: Int get() = colour ?: LINE_COLOURS[Math.floorMod((ref ?: name ?: id.toString()).hashCode(), LINE_COLOURS.size)]
 
+    /**
+     * The operator to show. In Tangier the buses are Isal's now, while the map data still says
+     * ALSA (Isal took over the same network), so there the name is updated.
+     */
+    val operatorShown: String?
+        get() {
+            val n = network ?: operator ?: return null
+            val p = paths.firstOrNull()?.firstOrNull() ?: return n
+            val tangier = p[0] in 35.60..35.92 && p[1] in -6.05..-5.55
+            return if (!tangier) n else Regex("(?i)alsa").replace(n) { if (it.value == it.value.uppercase()) "ISAL" else "Isal" }
+        }
+
     /** "L1" or the name: what a person calls it. */
     val short: String get() = ref ?: name ?: "Bus line"
 
@@ -376,4 +388,30 @@ object GtfsRt {
             atMs = at?.takeIf { it > 0 }, feed = feed.name,
         )
     }
+}
+
+/**
+ * Riding a bus line: where you are along its stops. [stops] are [lat, lon] in the line's
+ * order; the next stop is the one ahead of you: the nearest, or the one after it once you
+ * are between the two (or standing at the nearest).
+ */
+object Ride {
+    class Progress(val next: Int, val metres: Double, val left: Int)
+
+    fun progress(stops: List<DoubleArray>, lat: Double, lon: Double): Progress? {
+        if (stops.isEmpty()) return null
+        fun d(a: DoubleArray, bLat: Double, bLon: Double) = Geo.angle(Geo.ecef(a[0], a[1]), Geo.ecef(bLat, bLon)) * EARTH_R
+        val i = stops.indices.minBy { d(stops[it], lat, lon) }
+        val last = stops.lastIndex
+        val here = d(stops[i], lat, lon)
+        val next = when {
+            i < last && here < AT_STOP_M -> i + 1
+            i < last && d(stops[i + 1], lat, lon) < d(stops[i], stops[i + 1][0], stops[i + 1][1]) -> i + 1
+            else -> i
+        }
+        return Progress(next, d(stops[next], lat, lon), last - next + 1)
+    }
+
+    /** Standing this close to a stop counts as being at it. */
+    const val AT_STOP_M = 35.0
 }

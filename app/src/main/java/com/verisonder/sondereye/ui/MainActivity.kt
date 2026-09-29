@@ -228,6 +228,11 @@ class EyeState {
     var busLinesNote by mutableStateOf<String?>(null)
     /** Why the street-level roads could not load, if they could not. */
     var roadsProblem by mutableStateOf<String?>(null)
+    /** The bus line being ridden, and where the rider is along it. */
+    var riding by mutableStateOf<BusLine?>(null)
+    var ride by mutableStateOf<com.verisonder.sondereye.core.Ride.Progress?>(null)
+    /** Speed from the last position fix, m/s (for the time to the next stop). */
+    var rideSpeed by mutableStateOf<Float?>(null)
     /** The start-up sequence is on screen. */
     var booting by mutableStateOf(false)
     /** Live buses, and what the legend says about where they come from. */
@@ -297,6 +302,7 @@ class MainActivity : ComponentActivity() {
                     if (state.layers.passAlerts) schedulePassAlerts()
                 }
                 globe?.setLayer("me", listOf(meMarker(loc)))
+                updateRide(loc)
                 if (flyToMeOnFix) {
                     flyToMeOnFix = false
                     globe?.flyTo(loc.latitude, loc.longitude, flyToMeAlt)
@@ -323,6 +329,7 @@ class MainActivity : ComponentActivity() {
             // Fixes the draw order: later layers on top.
             for (name in listOf("fires", "quakes", "conflicts", "events", "cameras", "busStops", "buses", "webcams", "ships", "flights", "sats", "pin", "me")) globe?.setLayer(name, emptyList())
             applyMap()
+            applyHidden()
             globe?.northLocked = state.layers.northLock
             // A fresh start (not a rotation): the start-up sequence, and the globe flying in behind it.
             if (savedInstanceState == null && state.layers.bootAnimation) {
@@ -352,6 +359,7 @@ class MainActivity : ComponentActivity() {
                         },
                         zoomHold = { rate -> globe?.zoomHold(rate) },
                         revealGlobe = { globe?.reveal() },
+                        ride = ::ride,
                         myLocation = { myLocation() },
                         myLocationClose = { myLocation(ME_CLOSE_ALT) },
                         fixLocation = ::fixLocation,
@@ -502,6 +510,7 @@ class MainActivity : ComponentActivity() {
         if (new.trails != old.trails) glideFlights(System.currentTimeMillis())
         if (new.cameras != old.cameras) loadCameras()
         if (new.busLines != old.busLines) loadBusLines(force = true)
+        if (new.hidden != old.hidden) applyHidden()
         if (new.buses != old.buses) loadBuses(force = true)
         if (new.conflicts != old.conflicts) loadConflicts()
         Palette.dark = !new.lightPanels
@@ -1289,6 +1298,24 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Where to fly for a bus thing, or null when it is not one. */
+    /** Which globe layers and line groups each list's "Hide" keeps off the map. */
+    private fun applyHidden() {
+        val h = state.layers.hidden
+        val markers = h.flatMap { name ->
+            when (name) {
+                "sats" -> listOf("sats")
+                "busLines" -> listOf("busStops")
+                else -> listOf(name)
+            }
+        }.toSet()
+        val lines = buildSet {
+            if ("flights" in h) add("trails")
+            if ("busLines" in h) add("busLines")
+            if ("sats" in h) add("orbit")
+        }
+        globe?.setHidden(markers, lines)
+    }
+
     private fun busPlace(sel: Sel): DoubleArray? = when (sel) {
         is Sel.OfBusStop -> doubleArrayOf(sel.s.lat, sel.s.lon)
         is Sel.OfBus -> doubleArrayOf(sel.b.lat, sel.b.lon)
@@ -1297,6 +1324,37 @@ class MainActivity : ComponentActivity() {
             if (all.isEmpty()) null else all[all.size / 2]
         }
         else -> null
+    }
+
+    // ---- Riding a bus ---------------------------------------------------------------------
+
+    /**
+     * Rides [line] (null: stops): the map follows you along it, and its card says the next
+     * stop, how far, and how many are left. Needs your position, so it turns that on.
+     */
+    private fun ride(line: BusLine?) {
+        state.riding = line
+        state.ride = null
+        if (line == null) {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            return
+        }
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) // no dozing off mid-ride
+        select(Sel.OfBusLine(line))
+        if (!state.layers.location) change(state.layers.copy(location = true))
+        else if (hasLocationPermission()) where.refresh() else askPermission()
+        state.me?.let { loc ->
+            globe?.flyTo(loc.latitude, loc.longitude, (globe?.center()?.get(2) ?: RIDE_ALT).coerceIn(400.0, RIDE_ALT))
+            updateRide(loc)
+        }
+    }
+
+    private fun updateRide(loc: android.location.Location) {
+        val line = state.riding ?: return
+        val stops = line.stopIds.mapNotNull { id -> state.busStops.firstOrNull { it.id == id }?.let { doubleArrayOf(it.lat, it.lon) } }
+        state.ride = com.verisonder.sondereye.core.Ride.progress(stops, loc.latitude, loc.longitude)
+        state.rideSpeed = if (loc.hasSpeed()) loc.speed else null
+        globe?.lookAt(loc.latitude, loc.longitude) // the map keeps you in the middle
     }
 
     // ---- Live buses (GTFS Realtime through Transitland) ----------------------------------
@@ -1819,6 +1877,8 @@ class MainActivity : ComponentActivity() {
         private const val BUS_STOPS_MAX_ALT = 12_000.0
         private const val BUS_LINE_LIFT_M = 4.0 // just above the ground, never under it
         private const val BUS_FLY_ALT = 8_000.0
+        /** Height the map follows a ride from: the street and the next stops in view. */
+        private const val RIDE_ALT = 1_500.0
         /** Low enough for the area's own fires and webcams to load. */
         private const val FIRE_FLY_ALT = 400_000.0
         private const val WEBCAM_FLY_ALT = 40_000.0

@@ -56,6 +56,8 @@ data class Layers(
     val conflicts: Boolean = false,
     /** The start-up sequence when the app opens (asked for, so on by default). */
     val bootAnimation: Boolean = true,
+    /** Layers kept off the map (by their list's name) though still loaded: "Hide" in a list. */
+    val hidden: Set<String> = emptySet(),
     /** Map credits under the globe. Optional while the app is private; required by Esri, OSM and RainViewer once public. */
     val credits: Boolean = true,
     /** White chart-paper panels instead of dark ones. */
@@ -100,6 +102,7 @@ class Settings(context: Context) {
             buses = prefs.getBoolean("buses.enabled", d.buses),
             conflicts = prefs.getBoolean("conflicts.enabled", d.conflicts),
             bootAnimation = prefs.getBoolean("boot.enabled", d.bootAnimation),
+            hidden = (prefs.getString("layers.hidden", "") ?: "").split(',').filter { it.isNotBlank() }.toSet(),
             credits = prefs.getBoolean("map.credits", d.credits),
             lightPanels = prefs.getBoolean("ui.lightPanels", d.lightPanels),
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
@@ -134,6 +137,7 @@ class Settings(context: Context) {
             .putBoolean("buses.enabled", s.buses)
             .putBoolean("conflicts.enabled", s.conflicts)
             .putBoolean("boot.enabled", s.bootAnimation)
+            .putString("layers.hidden", s.hidden.joinToString(","))
             .putBoolean("map.credits", s.credits)
             .putBoolean("ui.lightPanels", s.lightPanels)
             .putBoolean("ui.northLock", s.northLock)
