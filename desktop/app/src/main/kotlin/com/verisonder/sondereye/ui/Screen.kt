@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -476,7 +477,7 @@ private fun StatusCard(state: EyeState, actions: Actions, modifier: Modifier) {
             any = true
             val q = state.quakes
             LayerLine(
-                Palette.shallow,
+                Palette.depth(0.0),
                 if (q.updatedAt == null && q.loading) "Loading earthquakes…" else count(q.items.size, "earthquake"),
                 buildString {
                     append("${l.minMag.label}, ${l.period.label.lowercase()}")
@@ -636,7 +637,7 @@ private fun Legend(state: EyeState, actions: Actions, modifier: Modifier) {
                 Modifier.padding(end = 30.dp), // room for the hide key
                 horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (l.quakes) Key(Sym.DOT, Palette.shallow, n(state.quakes), "quakes", off = "quakes" in state.layers.hidden) { actions.openList("quakes") }
+                if (l.quakes) Key(Sym.DOT, Palette.depth(0.0), n(state.quakes), "quakes", off = "quakes" in state.layers.hidden) { actions.openList("quakes") }
                 if (l.flights) Key(Sym.PLANE, Palette.text, n(state.flights), "flights", off = "flights" in state.layers.hidden) { actions.openList("flights") }
                 if (l.satellites || state.extraSats.isNotEmpty()) Key(Sym.DIAMOND, Palette.satellite, (state.sats.items.size + state.extraSats.size).toString(), "satellites", off = "sats" in state.layers.hidden) { actions.openList("sats") }
                 if (l.ships) Key(Sym.PLANE, Palette.ship, if (state.shipsNote != null) "–" else state.ships.size.toString(), "ships", off = "ships" in state.layers.hidden) { actions.openList("ships") }
@@ -1820,12 +1821,14 @@ private fun LayersPanel(
                     Text("Refresh every 5 min", color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
                     Box(Modifier.clickable(enabled = s.quakes) { change(s.copy(autoRefresh = !s.autoRefresh)) }.padding(8.dp)) { CheckMark(s.autoRefresh, s.quakes) }
                 }
-                Label("Colour is depth, size is magnitude")
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Legend(Palette.shallow, "0–70 km")
-                    Legend(Palette.mid, "70–300 km")
-                    Legend(Palette.deep, "300+ km")
-                }
+                if (s.dotColors["quakes"] == null) {
+                    Label("Colour is depth, size is magnitude")
+                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Legend(Palette.shallow, "0–70 km")
+                        Legend(Palette.mid, "70–300 km")
+                        Legend(Palette.deep, "300+ km")
+                    }
+                } else Label("Size is magnitude")
             }
 
             Divider()
@@ -1833,6 +1836,7 @@ private fun LayersPanel(
             ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
             Text("Pin size", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             ChipRow(listOf(0.5f, 0.7f, 1f), s.pinScale, { mapOf(0.5f to "Small", 0.7f to "Medium", 1f to "Large")[it] ?: "" }, true) { change(s.copy(pinScale = it)) }
+            DotStyles(s, change)
             Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
                 Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
                 Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }
@@ -2075,6 +2079,44 @@ private fun <T> ChipRow(items: List<T>, selected: T, label: (T) -> String, enabl
     ) {
         items.forEach { item ->
             FoChip(label(item), item == selected, enabled) { pick(item) }
+        }
+    }
+}
+
+private val DOT_LAYERS = listOf("fires" to "Fires", "conflicts" to "Conflicts", "quakes" to "Quakes", "events" to "Events", "cameras" to "Cameras")
+private val DOT_COLOURS = listOf(0xFFFF1744, 0xFFFF6D00, 0xFFFFEA00, 0xFF1AFF80, 0xFF00E5FF, 0xFF2979FF, 0xFFD500F9, 0xFFFFFFFF).map { it.toInt() }
+private val DOT_SIZES = listOf(0.6f, 1f, 1.5f, 2f)
+
+/** Colour and size of one dot layer at a time: pick the layer, then its colour and size. */
+@Composable
+private fun DotStyles(s: Layers, change: (Layers) -> Unit) {
+    var layer by remember { mutableStateOf(DOT_LAYERS[0].first) }
+    Text("Dots", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
+    ChipRow(DOT_LAYERS.map { it.first }, layer, { n -> DOT_LAYERS.first { it.first == n }.second }, true) { layer = it }
+    val picked = s.dotColors[layer]
+    Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Swatch(Palette.ownDots(layer), picked == null) { change(s.copy(dotColors = s.dotColors - layer)) }
+        DOT_COLOURS.forEach { c ->
+            Swatch(listOf(Color(c)), picked == c) { change(s.copy(dotColors = s.dotColors + (layer to c))) }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    ChipRow(DOT_SIZES, s.dotSizes[layer] ?: 1f, { mapOf(0.6f to "Small", 1f to "Normal", 1.5f to "Big", 2f to "Huge")[it] ?: "" }, true) { v ->
+        change(s.copy(dotSizes = if (v == 1f) s.dotSizes - layer else s.dotSizes + (layer to v)))
+    }
+}
+
+/** A square of one colour, or side-by-side stripes of a layer's own colours (Default). */
+@Composable
+private fun Swatch(colors: List<Color>, picked: Boolean, pick: () -> Unit) {
+    Box(
+        Modifier.size(30.dp)
+            .border(if (picked) 2.dp else 1.dp, if (picked) Palette.accent else Palette.line, RoundedCornerShape(2.dp))
+            .clickable(onClick = pick)
+            .padding(5.dp),
+    ) {
+        Row(Modifier.fillMaxSize()) {
+            colors.forEach { Box(Modifier.weight(1f).fillMaxHeight().background(it)) }
         }
     }
 }

@@ -67,6 +67,10 @@ data class Layers(
     val radarLoop: Boolean = false,
     /** How big the pins on the globe are, times their phone size (a PC screen is seen closer). */
     val pinScale: Float = 0.7f,
+    /** Dot layers' own colour (ARGB) instead of theirs, by layer name (menu: Dots). */
+    val dotColors: Map<String, Int> = emptyMap(),
+    /** Dot layers' size, times their normal size, by layer name (menu: Dots). */
+    val dotSizes: Map<String, Float> = emptyMap(),
 )
 
 /** Personal keys for the sources that need one. Kept on the phone only. */
@@ -110,8 +114,18 @@ class Settings {
             northLock = prefs.getBoolean("ui.northLock", d.northLock),
             radarLoop = prefs.getBoolean("weather.radarLoop", d.radarLoop),
             pinScale = (prefs.getString("ui.pinScale", null)?.toFloatOrNull() ?: d.pinScale),
+            dotColors = pairs(prefs.getString("ui.dotColors", null)) { it.toLongOrNull(16)?.toInt() },
+            dotSizes = pairs(prefs.getString("ui.dotSizes", null)) { it.toFloatOrNull() },
         )
     }
+
+    /** "fires:ff00e5ff,quakes:..." back into a map; unreadable entries are dropped. */
+    private fun <V> pairs(text: String?, value: (String) -> V?): Map<String, V> =
+        (text ?: "").split(',').mapNotNull { e ->
+            val k = e.substringBefore(':', "")
+            val v = value(e.substringAfter(':', ""))
+            if (k.isBlank() || v == null) null else k to v
+        }.toMap()
 
     fun save(s: Layers) {
         prefs.edit()
@@ -146,6 +160,8 @@ class Settings {
             .putBoolean("ui.northLock", s.northLock)
             .putBoolean("weather.radarLoop", s.radarLoop)
             .putString("ui.pinScale", s.pinScale.toString())
+            .putString("ui.dotColors", s.dotColors.entries.joinToString(",") { it.key + ":" + Integer.toHexString(it.value) })
+            .putString("ui.dotSizes", s.dotSizes.entries.joinToString(",") { it.key + ":" + it.value })
             .apply()
     }
 

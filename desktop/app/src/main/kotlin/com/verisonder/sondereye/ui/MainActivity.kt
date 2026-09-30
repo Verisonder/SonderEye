@@ -269,6 +269,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         state.keys = store.keys()
         state.brief.prefs = store.brief()
         Palette.dark = !state.layers.lightPanels
+        Palette.dotColors = state.layers.dotColors
         where = Where(
             onFix = { loc ->
                 val first = state.me == null
@@ -502,6 +503,8 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         if (new.buses != old.buses) loadBuses(force = true)
         if (new.conflicts != old.conflicts) loadConflicts()
         Palette.dark = !new.lightPanels
+        Palette.dotColors = new.dotColors
+        if (new.dotColors != old.dotColors || new.dotSizes != old.dotSizes) globe?.setDotStyles(new.dotColors, new.dotSizes)
         if (new.northLock != old.northLock) globe?.northLocked = new.northLock
         if (new.credits != old.credits || new.cameras != old.cameras || new.busLines != old.busLines) applyMap()
         if (new.ships != old.ships && !new.ships) closeShips()
@@ -569,6 +572,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
         globe?.setMap(base, overlays)
         globe?.setDayNight(l.dayNight)
         globe?.pinScale = l.pinScale
+        globe?.setDotStyles(l.dotColors, l.dotSizes)
         applyCredits(base, overlays)
     }
 

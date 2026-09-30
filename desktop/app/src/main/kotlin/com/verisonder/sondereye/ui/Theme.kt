@@ -29,6 +29,10 @@ object Palette {
     /** Dark scope panels (default) or light ones; switched in the menu. */
     var dark by mutableStateOf(true)
 
+    /** Colours picked in the menu for dot layers, by layer name (ARGB); none: their own. */
+    var dotColors by mutableStateOf<Map<String, Int>>(emptyMap())
+    private fun custom(layer: String): Color? = dotColors[layer]?.let { Color(it) }
+
     val space = Color(0xFF03060A)
     // Opaque: the globe must never show through text.
     val panel get() = if (dark) Color(0xFF07120B) else Color(0xFFF4FAF6)
@@ -56,19 +60,19 @@ object Palette {
     val flight = Color(0xFFF2F5F8)
     val satellite = Color(0xFF7CF0C8)
     val me = Color(0xFF3D8BFF)
-    val alpr = Color(0xFFFF4D6D)
-    val camera = Color(0xFFC77DFF)
+    val alpr get() = custom("cameras") ?: Color(0xFFFF4D6D)
+    val camera get() = custom("cameras") ?: Color(0xFFC77DFF)
     val ship = Color(0xFF4DD0E1)
     val webcam = Color(0xFFFFE066)
-    val fire = Color(0xFFFF3D00)
+    val fire get() = custom("fires") ?: Color(0xFFFF3D00)
     /** Buses, and bus lines that have no colour of their own in OpenStreetMap. */
     val bus = Color(0xFFFF9F43)
     val busStop = Color(0xFFF2F5F8)
     /** Places in the news for fighting. */
-    val conflict = Color(0xFFFF1744)
+    val conflict get() = custom("conflicts") ?: Color(0xFFFF1744)
 
     /** NASA EONET categories. */
-    fun event(category: String): Color = when (category) {
+    fun event(category: String): Color = custom("events") ?: when (category) {
         "wildfires" -> Color(0xFFFF6A3D)
         "volcanoes" -> Color(0xFFE0301E)
         "severeStorms" -> Color(0xFF8C9BFF)
@@ -77,10 +81,19 @@ object Palette {
         else -> Color(0xFFFFD166)
     }
 
-    fun depth(km: Double): Color = when {
+    fun depth(km: Double): Color = custom("quakes") ?: when {
         km < 70 -> shallow
         km < 300 -> mid
         else -> deep
+    }
+
+    /** A dot layer's own colours, whatever is picked (the menu's Default swatch). */
+    fun ownDots(layer: String): List<Color> = when (layer) {
+        "fires" -> listOf(Color(0xFFFF3D00))
+        "conflicts" -> listOf(Color(0xFFFF1744))
+        "cameras" -> listOf(Color(0xFFC77DFF), Color(0xFFFF4D6D))
+        "quakes" -> listOf(shallow, mid, deep)
+        else -> listOf(Color(0xFFFF6A3D), Color(0xFF8C9BFF), Color(0xFF3FA7FF))
     }
 }
 

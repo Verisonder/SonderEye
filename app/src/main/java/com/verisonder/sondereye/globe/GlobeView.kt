@@ -71,7 +71,31 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
      */
     fun setLayer(name: String, list: List<Marker>) {
         layers[name] = list
+        styled.remove(name)
         rebuildMarkers()
+    }
+
+    private var dotColors: Map<String, Int> = emptyMap()
+    private var dotSizes: Map<String, Float> = emptyMap()
+    /** Layers redrawn in a picked colour or size, kept until the layer or the pick changes. */
+    private val styled = HashMap<String, List<Marker>>()
+
+    /** Colour (ARGB) and size (times normal) picked for some layers (menu: Dots). */
+    fun setDotStyles(colors: Map<String, Int>, sizes: Map<String, Float>) {
+        if (colors == dotColors && sizes == dotSizes) return
+        dotColors = colors
+        dotSizes = sizes
+        styled.clear()
+        rebuildMarkers()
+    }
+
+    private fun styledLayer(name: String, list: List<Marker>): List<Marker> {
+        val c = dotColors[name]
+        val s = dotSizes[name] ?: 1f
+        if (c == null && s == 1f) return list
+        return styled.getOrPut(name) {
+            list.map { Marker(it.key, it.lat, it.lon, it.sizePx * s, c ?: it.rgb, it.shape, it.bearing, it.altM) }
+        }
     }
 
     private var hiddenLayers: Set<String> = emptySet()
@@ -89,7 +113,7 @@ class GlobeView(context: Context, private val listener: Listener) : GLSurfaceVie
     }
 
     private fun rebuildMarkers() {
-        all = layers.filterKeys { it !in hiddenLayers }.values.flatten()
+        all = layers.entries.filter { it.key !in hiddenLayers }.flatMap { styledLayer(it.key, it.value) }
         renderer.markers = all
         // Picking uses the altitude too: a satellite is picked where it is drawn.
         markerLat = DoubleArray(all.size) { all[it].lat }
