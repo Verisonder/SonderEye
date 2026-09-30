@@ -1810,116 +1810,141 @@ private fun LayersPanel(
         // Fits the screen in both orientations, scrolling inside.
         val maxH = (LocalConfiguration.current.screenHeightDp - 110).coerceAtLeast(200)
         Column(Modifier.heightIn(max = maxH.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            FoHeader("Layers", Modifier.padding(bottom = 10.dp))
-            Section("Earthquakes", "USGS, updated every minute", s.quakes) { change(s.copy(quakes = it)) }
-            Column(Modifier.alpha(if (s.quakes) 1f else 0.4f)) {
-                Label("Minimum magnitude")
-                ChipRow(MinMag.entries, s.minMag, { it.label }, s.quakes) { change(s.copy(minMag = it)) }
-                Label("Period")
-                ChipRow(Period.entries, s.period, { it.label }, s.quakes) { change(s.copy(period = it)) }
-                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Refresh every 5 min", color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                    Box(Modifier.clickable(enabled = s.quakes) { change(s.copy(autoRefresh = !s.autoRefresh)) }.padding(8.dp)) { CheckMark(s.autoRefresh, s.quakes) }
+            FoHeader("Settings", Modifier.padding(bottom = 6.dp))
+            var open by remember { mutableStateOf<String?>(null) }
+            fun on(vararg v: Boolean) = v.count { it }.let { if (it == 0) "all off" else "$it on" }
+            Group("Map", null, open == "map", { open = if (open == "map") null else "map" }) {
+                ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
+                Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
+                    Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
+                    Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }
                 }
-                if (s.dotColors["quakes"] == null) {
-                    Label("Colour is depth, size is magnitude")
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Legend(Palette.shallow, "0–70 km")
-                        Legend(Palette.mid, "70–300 km")
-                        Legend(Palette.deep, "300+ km")
+                Toggle("Day and night", s.dayNight, true) { change(s.copy(dayNight = it)) }
+                Toggle("City lights at night", s.lights, s.dayNight) { change(s.copy(lights = it)) }
+
+                Divider()
+                Section("Rain radar", "RainViewer, last 10 minutes; right-click anywhere for its weather", s.radar) { change(s.copy(radar = it)) }
+                Toggle("Loop the past hour", s.radarLoop, s.radar) { change(s.copy(radarLoop = it)) }
+
+                Divider()
+                Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
+            }
+            Group("Pins", null, open == "pins", { open = if (open == "pins") null else "pins" }) {
+                Text("Pin size", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                ChipRow(listOf(0.5f, 0.7f, 1f), s.pinScale, { mapOf(0.5f to "Small", 0.7f to "Medium", 1f to "Large")[it] ?: "" }, true) { change(s.copy(pinScale = it)) }
+                DotStyles(s, change)
+            }
+            Group("On the ground", on(s.quakes, s.events, s.fires, s.conflicts, s.cameras, s.webcams), open == "ground", { open = if (open == "ground") null else "ground" }) {
+                Section("Earthquakes", "USGS, updated every minute", s.quakes) { change(s.copy(quakes = it)) }
+                Column(Modifier.alpha(if (s.quakes) 1f else 0.4f)) {
+                    Label("Minimum magnitude")
+                    ChipRow(MinMag.entries, s.minMag, { it.label }, s.quakes) { change(s.copy(minMag = it)) }
+                    Label("Period")
+                    ChipRow(Period.entries, s.period, { it.label }, s.quakes) { change(s.copy(period = it)) }
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Refresh every 5 min", color = Palette.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Box(Modifier.clickable(enabled = s.quakes) { change(s.copy(autoRefresh = !s.autoRefresh)) }.padding(8.dp)) { CheckMark(s.autoRefresh, s.quakes) }
                     }
-                } else Label("Size is magnitude")
-            }
-
-            Divider()
-            FoHeader("Map", Modifier.padding(bottom = 6.dp))
-            ChipRow(MapStyle.entries, s.map, { it.label }, true) { change(s.copy(map = it)) }
-            Text("Pin size", color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            ChipRow(listOf(0.5f, 0.7f, 1f), s.pinScale, { mapOf(0.5f to "Small", 0.7f to "Medium", 1f to "Large")[it] ?: "" }, true) { change(s.copy(pinScale = it)) }
-            DotStyles(s, change)
-            Column(Modifier.alpha(if (s.map != MapStyle.STREETS) 1f else 0.4f)) {
-                Toggle("Roads", s.roads, s.map != MapStyle.STREETS) { change(s.copy(roads = it)) }
-                Toggle("Place names and borders", s.labels, s.map != MapStyle.STREETS) { change(s.copy(labels = it)) }
-            }
-            Toggle("Day and night", s.dayNight, true) { change(s.copy(dayNight = it)) }
-            Toggle("City lights at night", s.lights, s.dayNight) { change(s.copy(lights = it)) }
-
-            Divider()
-            Section("Rain radar", "RainViewer, last 10 minutes; right-click anywhere for its weather", s.radar) { change(s.copy(radar = it)) }
-            Toggle("Loop the past hour", s.radarLoop, s.radar) { change(s.copy(radarLoop = it)) }
-
-            Divider()
-            Section("Flights", "adsb.lol, near the screen centre, every 15 s", s.flights) { change(s.copy(flights = it)) }
-            Toggle("Trails (last 30 min)", s.trails, s.flights) { change(s.copy(trails = it)) }
-
-            Divider()
-            Section("Satellites", "CelesTrak orbits, positions computed live", s.satellites) { change(s.copy(satellites = it)) }
-            Column(Modifier.alpha(if (s.satellites) 1f else 0.4f)) {
-                Label("Group")
-                ChipRow(SatGroup.entries, s.satGroup, { it.label }, s.satellites) { change(s.copy(satGroup = it)) }
-            }
-            Toggle("Alert me before visible ISS passes", s.passAlerts, true) { change(s.copy(passAlerts = it)) }
-
-            Divider()
-            Section("Natural events", "NASA EONET: fires, volcanoes, storms, ice", s.events) { change(s.copy(events = it)) }
-
-            Divider()
-            Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
-
-            Divider()
-            Section("Conflicts", "Places the news reports fighting in, up to a day back (GDELT)", s.conflicts) { change(s.copy(conflicts = it)) }
-
-            Divider()
-            Section("Bus lines", "Routes and stops from OpenStreetMap; load below 40 km", s.busLines) { change(s.copy(busLines = it)) }
-
-            Divider()
-            Section("Live buses", "Where the operator publishes positions, below 300 km. Needs a key.", s.buses) { change(s.copy(buses = it)) }
-
-            Divider()
-            Section("Ships", "Live positions from AISStream, below 2,000 km. Needs a key.", s.ships) { change(s.copy(ships = it)) }
-
-            Divider()
-            Section("Webcams", "Windy webcams near the centre, below 1,000 km. Needs a key.", s.webcams) { change(s.copy(webcams = it)) }
-
-            Divider()
-            Section("Fire hotspots", "Every fire NASA satellites saw in the last 24 h. Needs a key.", s.fires) { change(s.copy(fires = it)) }
-
-            Divider()
-            Section("Where I am", "Your position, only while the app is open", s.location) { change(s.copy(location = it)) }
-
-            Divider()
-            FoHeader("API keys")
-            Text(
-                "Free, and kept on this PC only. Get a key opens the page where you sign up; paste the key here.",
-                color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp),
-            )
-            KeyField("AISStream", "Ships", keys.ais, "https://aisstream.io/apikeys") { saveKeys(keys.copy(ais = it)) }
-            KeyField("Windy Webcams", "Webcams", keys.windy, "https://api.windy.com/keys") { saveKeys(keys.copy(windy = it)) }
-            KeyField("NASA FIRMS", "Fire hotspots", keys.firms, "https://firms.modaps.eosdis.nasa.gov/api/map_key/") { saveKeys(keys.copy(firms = it)) }
-            KeyField("Transitland", "Live buses", keys.transitland, "https://app.interline.io/products/tlv2_api/orders/new") { saveKeys(keys.copy(transitland = it)) }
-            KeyField("Google Gemini", "the written brief in Today", keys.gemini, "https://aistudio.google.com/apikey") { saveKeys(keys.copy(gemini = it)) }
-
-            Divider()
-            Toggle("Light panels", s.lightPanels, true) { change(s.copy(lightPanels = it)) }
-            Toggle("Start-up animation", s.bootAnimation, true) { change(s.copy(bootAnimation = it)) }
-            Text(
-                "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +
-                    "Sources in use: " + allCredits.joinToString(", ") + ".",
-                color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
-            )
-
-            Divider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Map cache", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        cacheBytes?.let { "%.1f MB of map tiles on this PC".format(it / 1e6) } ?: "Measuring…",
-                        color = Palette.dim, fontSize = 12.sp,
-                    )
+                    if (s.dotColors["quakes"] == null) {
+                        Label("Colour is depth, size is magnitude")
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Legend(Palette.shallow, "0–70 km")
+                            Legend(Palette.mid, "70–300 km")
+                            Legend(Palette.deep, "300+ km")
+                        }
+                    } else Label("Size is magnitude")
                 }
-                FoButton("Clear", enabled = (cacheBytes ?: 0) > 0, onClick = clearCache)
+
+                Divider()
+                Section("Natural events", "NASA EONET: fires, volcanoes, storms, ice", s.events) { change(s.copy(events = it)) }
+
+                Divider()
+                Section("Fire hotspots", "Every fire NASA satellites saw in the last 24 h. Needs a key.", s.fires) { change(s.copy(fires = it)) }
+
+                Divider()
+                Section("Conflicts", "Places the news reports fighting in, up to a day back (GDELT)", s.conflicts) { change(s.copy(conflicts = it)) }
+
+                Divider()
+                Section("Surveillance cameras", "OpenStreetMap; plate readers in red; load below 60 km", s.cameras) { change(s.copy(cameras = it)) }
+
+                Divider()
+                Section("Webcams", "Windy webcams near the centre, below 1,000 km. Needs a key.", s.webcams) { change(s.copy(webcams = it)) }
+            }
+            Group("Air, space and sea", on(s.flights, s.satellites, s.ships), open == "air", { open = if (open == "air") null else "air" }) {
+                Section("Flights", "adsb.lol, near the screen centre, every 15 s", s.flights) { change(s.copy(flights = it)) }
+                Toggle("Trails (last 30 min)", s.trails, s.flights) { change(s.copy(trails = it)) }
+
+                Divider()
+                Section("Satellites", "CelesTrak orbits, positions computed live", s.satellites) { change(s.copy(satellites = it)) }
+                Column(Modifier.alpha(if (s.satellites) 1f else 0.4f)) {
+                    Label("Group")
+                    ChipRow(SatGroup.entries, s.satGroup, { it.label }, s.satellites) { change(s.copy(satGroup = it)) }
+                }
+                Toggle("Alert me before visible ISS passes", s.passAlerts, true) { change(s.copy(passAlerts = it)) }
+
+                Divider()
+                Section("Ships", "Live positions from AISStream, below 2,000 km. Needs a key.", s.ships) { change(s.copy(ships = it)) }
+            }
+            Group("Buses", on(s.busLines, s.buses), open == "buses", { open = if (open == "buses") null else "buses" }) {
+                Section("Bus lines", "Routes and stops from OpenStreetMap; load below 40 km", s.busLines) { change(s.copy(busLines = it)) }
+
+                Divider()
+                Section("Live buses", "Where the operator publishes positions, below 300 km. Needs a key.", s.buses) { change(s.copy(buses = it)) }
+            }
+            Group("API keys", null, open == "keys", { open = if (open == "keys") null else "keys" }) {
+                Text(
+                    "Free, and kept on this PC only. Get a key opens the page where you sign up; paste the key here.",
+                    color = Palette.dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp),
+                )
+                KeyField("AISStream", "Ships", keys.ais, "https://aisstream.io/apikeys") { saveKeys(keys.copy(ais = it)) }
+                KeyField("Windy Webcams", "Webcams", keys.windy, "https://api.windy.com/keys") { saveKeys(keys.copy(windy = it)) }
+                KeyField("NASA FIRMS", "Fire hotspots", keys.firms, "https://firms.modaps.eosdis.nasa.gov/api/map_key/") { saveKeys(keys.copy(firms = it)) }
+                KeyField("Transitland", "Live buses", keys.transitland, "https://app.interline.io/products/tlv2_api/orders/new") { saveKeys(keys.copy(transitland = it)) }
+                KeyField("Google Gemini", "the written brief in Today", keys.gemini, "https://aistudio.google.com/apikey") { saveKeys(keys.copy(gemini = it)) }
+            }
+            Group("App", null, open == "app", { open = if (open == "app") null else "app" }) {
+                Toggle("Light panels", s.lightPanels, true) { change(s.copy(lightPanels = it)) }
+                Toggle("Start-up animation", s.bootAnimation, true) { change(s.copy(bootAnimation = it)) }
+                Text(
+                    "Esri, RainViewer and OpenStreetMap require their names on the map once the app is public. " +
+                        "Sources in use: " + allCredits.joinToString(", ") + ".",
+                    color = Palette.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
+                )
+
+                Divider()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Map cache", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            cacheBytes?.let { "%.1f MB of map tiles on this PC".format(it / 1e6) } ?: "Measuring…",
+                            color = Palette.dim, fontSize = 12.sp,
+                        )
+                    }
+                    FoButton("Clear", enabled = (cacheBytes ?: 0) > 0, onClick = clearCache)
+                }
             }
         }
+    }
+}
+
+/**
+ * One part of the settings, folded to its title until tapped: "[ + ] MAP", with how
+ * many of its layers are on at the right.
+ */
+@Composable
+private fun Group(title: String, note: String?, open: Boolean, toggle: () -> Unit, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = toggle).padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (open) "[ − ]" else "[ + ]", color = Palette.signal, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(10.dp))
+            Text(title.uppercase(), color = Palette.signal, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            if (note != null) Text(note, color = Palette.dim, fontSize = 12.sp)
+        }
+        if (open) Column(Modifier.padding(start = 4.dp, bottom = 12.dp)) { content() }
+        HorizontalDivider(color = Palette.line)
     }
 }
 
