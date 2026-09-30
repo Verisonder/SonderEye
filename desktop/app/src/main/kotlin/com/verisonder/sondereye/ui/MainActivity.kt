@@ -60,7 +60,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import kotlin.math.roundToInt
 
 /** One layer's download state. */
 class Feed<T> {
@@ -667,11 +666,7 @@ class MainActivity(private val scope: CoroutineScope, private val screenDensity:
             val key = state.keys.gemini
             if (key.isNotEmpty() && b.stories.isNotEmpty()) {
                 b.writing = true
-                val weatherLine = b.weather?.let { w ->
-                    val d = b.forecast?.days?.firstOrNull()
-                    "${w.tempC.roundToInt()} °C now, ${w.description.lowercase()}" + (d?.let { ", high ${it.maxC.roundToInt()} °C, low ${it.minC.roundToInt()} °C" } ?: "")
-                }
-                when (val out = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, weatherLine, b.place, p) }) {
+                when (val out = withContext(Dispatchers.IO) { Feeds.brief(key, b.stories, null, b.place, p) /* news only: the weather is shown above it */ }) {
                     is Net.Outcome.Ok -> b.summary = out.value
                     is Net.Outcome.Failed -> b.summaryProblem = out.message // the previous summary stays
                 }
